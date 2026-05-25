@@ -1,0 +1,6 @@
+@TKVL_HostAddress = http://localhost:5279
+
+GET {{TKVL_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
