@@ -14,6 +14,13 @@ public partial class JobPortalDbContext : DbContext
         : base(options)
     {
     }
+    public virtual DbSet<MauCV> MauCVs { get; set; }
+
+    public virtual DbSet<DanhMucMau> DanhMucMaus { get; set; }
+
+    public virtual DbSet<PhanLoaiMau> PhanLoaiMaus { get; set; }
+
+    public virtual DbSet<MauSac_MauCV> MauSacs { get; set; }
 
     public virtual DbSet<ChiTietViTri> ChiTietViTris { get; set; }
 
@@ -426,6 +433,41 @@ public partial class JobPortalDbContext : DbContext
                   .WithMany()
                   .HasForeignKey(d => d.MaUser)
                   .OnDelete(DeleteBehavior.Restrict); 
+        });
+
+        modelBuilder.Entity<PhanLoaiMau>(entity =>
+        {
+            entity.HasKey(e => new { e.MaMau, e.MaDanhMuc }); 
+
+            entity.HasOne(d => d.MauCVNavigation)
+                .WithMany(p => p.PhanLoaiMaus)
+                .HasForeignKey(d => d.MaMau)
+                .HasConstraintName("FK_PhanLoaiMau_MauCV")
+                .OnDelete(DeleteBehavior.Cascade); 
+
+            entity.HasOne(d => d.DanhMucMauNavigation)
+                .WithMany(p => p.PhanLoaiMaus)
+                .HasForeignKey(d => d.MaDanhMuc)
+                .HasConstraintName("FK_PhanLoaiMau_DanhMuc")
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MauSac_MauCV>(entity =>
+        {
+            entity.HasOne(d => d.MauCVNavigation)
+                .WithMany(p => p.MauSacs)
+                .HasForeignKey(d => d.MaMau)
+                .HasConstraintName("FK_MauSac_MauCV")
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Cv>(entity =>
+        {
+            entity.HasOne(d => d.MaMauNavigation)
+                .WithMany(p => p.Cvs)
+                .HasForeignKey(d => d.MaMau)
+                .HasConstraintName("FK_Cv_MauCV")
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 

@@ -350,6 +350,15 @@ namespace TKVL.Controllers
                 return BadRequest(new { success = false, message = "Tài khoản của bạn hiện đã bị khóa bởi Admin!" });
             }
 
+            if (string.IsNullOrEmpty(user.MatKhau))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Tài khoản này được kết nối qua Google/Facebook. Vui lòng đăng nhập bằng Mạng xã hội hoặc dùng 'Quên mật khẩu' để tạo mật khẩu mới!"
+                });
+            }
+
             // So khớp mật khẩu băm BCrypt
             bool isPasswordValid = BCrypt.Net.BCrypt.Verify(dto.MatKhau, user.MatKhau);
             if (!isPasswordValid)
@@ -390,6 +399,7 @@ namespace TKVL.Controllers
 
             return Ok(new { success = true, token = jwtToken, message = "Đăng nhập hệ thống thành công!" });
         }
+
         [HttpPost("refresh-token")]
         public async Task<IActionResult> Refresh([FromBody] TokenRequestDto dto)
         {
