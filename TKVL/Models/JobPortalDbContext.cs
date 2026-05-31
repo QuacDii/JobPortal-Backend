@@ -17,6 +17,10 @@ public partial class JobPortalDbContext : DbContext
 
     public virtual DbSet<ChiTietViTri> ChiTietViTris { get; set; }
 
+    public virtual DbSet<LichSuMoKhoaCV> LichSuMoKhoaCvs { get; set; }
+
+    public virtual DbSet<JobAlert> JobAlerts { get; set; }
+
     public virtual DbSet<CongTy> CongTies { get; set; }
 
     public virtual DbSet<Cv> Cvs { get; set; }
@@ -399,6 +403,30 @@ public partial class JobPortalDbContext : DbContext
         });
 
         OnModelCreatingPartial(modelBuilder);
+        modelBuilder.Entity<LichSuMoKhoaCV>(entity =>
+        {
+            entity.HasKey(e => e.MaLichSu);
+
+            entity.HasOne(d => d.MaUserNavigation)
+                  .WithMany()
+                  .HasForeignKey(d => d.MaUser)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(d => d.MaCvNavigation)
+                  .WithMany()
+                  .HasForeignKey(d => d.MaCv)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<JobAlert>(entity =>
+        {
+            entity.HasKey(e => e.MaAlert);
+
+            entity.HasOne(d => d.MaUserNavigation)
+                  .WithMany()
+                  .HasForeignKey(d => d.MaUser)
+                  .OnDelete(DeleteBehavior.Restrict); 
+        });
     }
 
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
