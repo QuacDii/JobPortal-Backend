@@ -24,7 +24,6 @@ namespace TKVL.Controllers
             _config = config.Value;
         }
 
-        // 1. GỌI TỪ FRONTEND ĐỂ TẠO URL QR CODE
         [HttpPost("create")]
         public async Task<IActionResult> CreatePaymentUrl(int maUser, decimal soTien)
         {
@@ -36,49 +35,45 @@ namespace TKVL.Controllers
             return BadRequest(response.Message);
         }
 
-        // 2. IPN/WEBHOOK: MOMO GỌI NGẦM VÀO ĐÂY ĐỂ XÁC NHẬN CỘNG TIỀN (Quan trọng nhất)
+        // Đã sửa lại kiểu dữ liệu đầu vào là MomoNotifyRequest
         [HttpPost("MomoNotify")]
-        public async Task<IActionResult> MomoNotify([FromBody] Dictionary<string, string> requestData)
+        public async Task<IActionResult> MomoNotify([FromBody] MomoNotifyRequest requestData)
         {
             try
             {
-                // Verify Signature để chống hacker gọi API giả mạo
-                string rawHash = $"accessKey={_config.AccessKey}&amount={requestData["amount"]}&extraData={requestData["extraData"]}&message={requestData["message"]}&orderId={requestData["orderId"]}&orderInfo={requestData["orderInfo"]}&orderType={requestData["orderType"]}&partnerCode={requestData["partnerCode"]}&payType={requestData["payType"]}&requestId={requestData["requestId"]}&responseTime={requestData["responseTime"]}&resultCode={requestData["resultCode"]}&transId={requestData["transId"]}";
+                // Chuỗi rawHash phải được nối đúng thứ tự Alphabet như MoMo yêu cầu
+                string rawHash = $"accessKey={_config.AccessKey}&amount={requestData.amount}&extraData={requestData.extraData}&message={requestData.message}&orderId={requestData.orderId}&orderInfo={requestData.orderInfo}&orderType={requestData.orderType}&partnerCode={requestData.partnerCode}&payType={requestData.payType}&requestId={requestData.requestId}&responseTime={requestData.responseTime}&resultCode={requestData.resultCode}&transId={requestData.transId}";
 
                 string signature = HashHelper.HmacSHA256(rawHash, _config.SecretKey);
 
-                if (signature != requestData["signature"])
+                if (signature != requestData.signature)
                 {
                     return BadRequest(new { message = "Sai chữ ký bảo mật!" });
                 }
 
-                // Giao dịch thành công
-                if (requestData["resultCode"] == "0")
+                // Giao dịch thành công (resultCode == 0)
+                if (requestData.resultCode == 0)
                 {
-                    // Lấy MaUser từ extraData (Giải mã Base64)
-                    byte[] extraDataBytes = Convert.FromBase64String(requestData["extraData"]);
+                    byte[] extraDataBytes = Convert.FromBase64String(requestData.extraData);
                     int maUser = int.Parse(Encoding.UTF8.GetString(extraDataBytes));
-                    decimal amount = decimal.Parse(requestData["amount"]);
 
-                    // Dùng Transaction để đảm bảo toàn vẹn dữ liệu ACID
+                    // Dùng Transaction để cập nhật DB
                     using var transaction = await _context.Database.BeginTransactionAsync();
 
                     var user = await _context.Users.FirstOrDefaultAsync(u => u.MaUser == maUser);
                     if (user != null)
                     {
-                        // 1. Cộng tiền
-                        user.SoDuVi += amount;
+                        user.SoDuVi += requestData.amount; // Cộng tiền
 
-                        // 2. Lưu lịch sử giao dịch (Khớp với ERD của bạn)
                         var giaoDich = new GiaoDich
                         {
                             MaUser = maUser,
                             LoaiGiaoDich = 1, // 1: Nạp tiền
-                            SoTien = amount,
+                            SoTien = requestData.amount,
                             PhuongThuc = "MoMo",
-                            MaGiaoDichDoiTac = requestData["transId"], // Lưu mã GD của MoMo để đối soát
+                            MaGiaoDichDoiTac = requestData.transId.ToString(),
                             NgayGd = DateTime.Now,
-                            TrangThai = true // Thành công
+                            TrangThai = true
                         };
 
                         _context.GiaoDiches.Add(giaoDich);
@@ -87,26 +82,24 @@ namespace TKVL.Controllers
                     }
                 }
 
-                // MoMo yêu cầu trả về status 204 NoContent để biết Server mình đã nhận được thông báo
                 return NoContent();
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[LỖI IPN MOMO]: {ex.Message}");
                 return BadRequest();
             }
         }
 
-        // 3. RETURN URL: SAU KHI QUÉT QR, TRÌNH DUYỆT SẼ NHẢY VỀ ĐÂY
+        // Đã sửa lại port thành 5173 khớp với ReactJS của bạn
         [HttpGet("PaymentCallBack")]
         public IActionResult PaymentCallBack([FromQuery] string resultCode, [FromQuery] string orderId)
         {
             if (resultCode == "0")
             {
-                // Chuyển hướng về ReactJS trang nạp tiền thành công
-                return Redirect($"http://localhost:3000/payment-success?orderId={orderId}");
+                return Redirect($"http://localhost:5173/payment-success?orderId={orderId}");
             }
-            // Thất bại
-            return Redirect($"http://localhost:3000/payment-failed?orderId={orderId}");
+            return Redirect($"http://localhost:5173/payment-failed?orderId={orderId}");
         }
     }
 }

@@ -1,5 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using TKVL.Models;
+using TKVL.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,6 +11,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+// Đăng ký Email Service
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 // 2. Cấu hình Database
 builder.Services.AddDbContext<JobPortalDbContext>(options =>
@@ -24,6 +30,20 @@ builder.Services.AddCors(options => {
                         .AllowAnyHeader());
 });
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+        };
+    });
 var app = builder.Build();
 
 // Cấu hình HTTP request pipeline.
@@ -35,7 +55,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("AllowReactApp");
 
-app.UseAuthorization(); // Giữ lại middleware này theo chuẩn mặc định của ASP.NET Core
+app.UseAuthorization();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 

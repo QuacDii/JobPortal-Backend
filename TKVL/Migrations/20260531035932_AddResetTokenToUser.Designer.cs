@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260531035932_AddResetTokenToUser")]
+    partial class AddResetTokenToUser
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -174,12 +177,6 @@ namespace TKVL.Migrations
                         .HasColumnType("bit")
                         .HasColumnName("isPublic");
 
-                    b.Property<string>("MaHex")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("MaMau")
-                        .HasColumnType("int");
-
                     b.Property<int>("MaUser")
                         .HasColumnType("int")
                         .HasColumnName("maUser");
@@ -193,29 +190,9 @@ namespace TKVL.Migrations
                     b.HasKey("MaCv")
                         .HasName("PK__CV__7A3E0CF073B2E13F");
 
-                    b.HasIndex("MaMau");
-
                     b.HasIndex("MaUser");
 
                     b.ToTable("CV", (string)null);
-                });
-
-            modelBuilder.Entity("TKVL.Models.DanhMucMau", b =>
-                {
-                    b.Property<int>("MaDanhMuc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaDanhMuc"));
-
-                    b.Property<string>("TenDanhMuc")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.HasKey("MaDanhMuc");
-
-                    b.ToTable("DanhMucMaus");
                 });
 
             modelBuilder.Entity("TKVL.Models.DonUngTuyen", b =>
@@ -438,61 +415,6 @@ namespace TKVL.Migrations
                     b.ToTable("LichSuMoKhoaCvs");
                 });
 
-            modelBuilder.Entity("TKVL.Models.MauCV", b =>
-                {
-                    b.Property<int>("MaMau")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaMau"));
-
-                    b.Property<string>("AnhThumbnail")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<bool>("IsATS")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("MoTa")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<string>("TenMau")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<bool>("TrangThai")
-                        .HasColumnType("bit");
-
-                    b.HasKey("MaMau");
-
-                    b.ToTable("MauCVs");
-                });
-
-            modelBuilder.Entity("TKVL.Models.MauSac_MauCV", b =>
-                {
-                    b.Property<int>("MaMauSac")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaMauSac"));
-
-                    b.Property<string>("MaHex")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
-
-                    b.Property<int>("MaMau")
-                        .HasColumnType("int");
-
-                    b.HasKey("MaMauSac");
-
-                    b.HasIndex("MaMau");
-
-                    b.ToTable("MauSacs");
-                });
-
             modelBuilder.Entity("TKVL.Models.NganhNghe", b =>
                 {
                     b.Property<int>("MaNganh")
@@ -518,21 +440,6 @@ namespace TKVL.Migrations
                         .HasName("PK__NganhNgh__4E0C021750B7BE5B");
 
                     b.ToTable("NganhNghe", (string)null);
-                });
-
-            modelBuilder.Entity("TKVL.Models.PhanLoaiMau", b =>
-                {
-                    b.Property<int>("MaMau")
-                        .HasColumnType("int");
-
-                    b.Property<int>("MaDanhMuc")
-                        .HasColumnType("int");
-
-                    b.HasKey("MaMau", "MaDanhMuc");
-
-                    b.HasIndex("MaDanhMuc");
-
-                    b.ToTable("PhanLoaiMaus");
                 });
 
             modelBuilder.Entity("TKVL.Models.PhuongXa", b =>
@@ -806,20 +713,12 @@ namespace TKVL.Migrations
 
             modelBuilder.Entity("TKVL.Models.Cv", b =>
                 {
-                    b.HasOne("TKVL.Models.MauCV", "MaMauNavigation")
-                        .WithMany("Cvs")
-                        .HasForeignKey("MaMau")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("FK_Cv_MauCV");
-
                     b.HasOne("TKVL.Models.User", "MaUserNavigation")
                         .WithMany("Cvs")
                         .HasForeignKey("MaUser")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("FK_CV_User");
-
-                    b.Navigation("MaMauNavigation");
 
                     b.Navigation("MaUserNavigation");
                 });
@@ -900,39 +799,6 @@ namespace TKVL.Migrations
                     b.Navigation("MaUserNavigation");
                 });
 
-            modelBuilder.Entity("TKVL.Models.MauSac_MauCV", b =>
-                {
-                    b.HasOne("TKVL.Models.MauCV", "MauCVNavigation")
-                        .WithMany("MauSacs")
-                        .HasForeignKey("MaMau")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_MauSac_MauCV");
-
-                    b.Navigation("MauCVNavigation");
-                });
-
-            modelBuilder.Entity("TKVL.Models.PhanLoaiMau", b =>
-                {
-                    b.HasOne("TKVL.Models.DanhMucMau", "DanhMucMauNavigation")
-                        .WithMany("PhanLoaiMaus")
-                        .HasForeignKey("MaDanhMuc")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_PhanLoaiMau_DanhMuc");
-
-                    b.HasOne("TKVL.Models.MauCV", "MauCVNavigation")
-                        .WithMany("PhanLoaiMaus")
-                        .HasForeignKey("MaMau")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_PhanLoaiMau_MauCV");
-
-                    b.Navigation("DanhMucMauNavigation");
-
-                    b.Navigation("MauCVNavigation");
-                });
-
             modelBuilder.Entity("TKVL.Models.PhuongXa", b =>
                 {
                     b.HasOne("TKVL.Models.ThanhPho", "MaTpNavigation")
@@ -1011,23 +877,9 @@ namespace TKVL.Migrations
                     b.Navigation("DonUngTuyens");
                 });
 
-            modelBuilder.Entity("TKVL.Models.DanhMucMau", b =>
-                {
-                    b.Navigation("PhanLoaiMaus");
-                });
-
             modelBuilder.Entity("TKVL.Models.GoiDichVu", b =>
                 {
                     b.Navigation("GiaoDiches");
-                });
-
-            modelBuilder.Entity("TKVL.Models.MauCV", b =>
-                {
-                    b.Navigation("Cvs");
-
-                    b.Navigation("MauSacs");
-
-                    b.Navigation("PhanLoaiMaus");
                 });
 
             modelBuilder.Entity("TKVL.Models.NganhNghe", b =>

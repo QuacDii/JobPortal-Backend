@@ -9,6 +9,10 @@ public partial class Cv
 
     public int MaUser { get; set; }
 
+    public int? MaMau { get; set; } 
+
+    public string? MaHex { get; set; }
+
     public string TieuDe { get; set; } = null!;
 
     public string? DuongDan { get; set; }
@@ -20,4 +24,6 @@ public partial class Cv
     public virtual ICollection<DonUngTuyen> DonUngTuyens { get; set; } = new List<DonUngTuyen>();
 
     public virtual User MaUserNavigation { get; set; } = null!;
+
+    public virtual MauCV? MaMauNavigation { get; set; }
 }

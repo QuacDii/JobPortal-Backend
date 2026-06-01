@@ -27,7 +27,17 @@ public partial class User
 
     public DateTime NgayTao { get; set; }
 
+    public int LuotXemCvConLai { get; set; } = 0;
+
     public virtual CongTy? CongTy { get; set; }
+
+    public string? RefreshToken { get; set; }
+
+    public string? ResetToken { get; set; }
+
+    public DateTime? ResetTokenExpiry { get; set; }
+
+    public DateTime? NgayHetHanRefreshToken { get; set; }
 
     public virtual ICollection<Cv> Cvs { get; set; } = new List<Cv>();
 
