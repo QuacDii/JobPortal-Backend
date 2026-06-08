@@ -28,6 +28,7 @@ public partial class User
     public DateTime NgayTao { get; set; }
 
     public int LuotXemCvConLai { get; set; } = 0;
+    public DateTime? NgayHetHanGoi { get; set; }
 
     public virtual CongTy? CongTy { get; set; }
 

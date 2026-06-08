@@ -55,7 +55,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("AllowReactApp");
 
-app.UseAuthorization();
 app.UseAuthentication();
 app.UseAuthorization();
 

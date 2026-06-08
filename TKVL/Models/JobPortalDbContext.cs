@@ -222,7 +222,6 @@ public partial class JobPortalDbContext : DbContext
                 .HasColumnName("ngayGD");
             entity.Property(e => e.PhuongThuc)
                 .HasMaxLength(50)
-                .IsUnicode(false)
                 .HasColumnName("phuongThuc");
             entity.Property(e => e.SoTien)
                 .HasColumnType("decimal(18, 2)")
@@ -251,10 +250,13 @@ public partial class JobPortalDbContext : DbContext
                 .HasColumnName("giaTien");
             entity.Property(e => e.LoaiGoi).HasColumnName("loaiGoi");
             entity.Property(e => e.SoLuotXemCv).HasColumnName("soLuotXemCV");
-            entity.Property(e => e.SoNgayHieuLuc).HasColumnName("soNgayHieuLuc");
+            entity.Property(e => e.DonViThoiGian).HasColumnName("donViThoiGian");
             entity.Property(e => e.TenGoi)
                 .HasMaxLength(100)
                 .HasColumnName("tenGoi");
+            entity.Property(e => e.GiaKhuyenMai)
+                .HasColumnType("decimal(18, 2)")
+                .HasColumnName("giaKhuyenMai");
         });
 
         modelBuilder.Entity<KyNang>(entity =>

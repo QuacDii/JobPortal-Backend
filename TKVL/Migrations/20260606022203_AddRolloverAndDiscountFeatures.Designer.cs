@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260606022203_AddRolloverAndDiscountFeatures")]
+    partial class AddRolloverAndDiscountFeatures
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -330,13 +333,8 @@ namespace TKVL.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaGoi"));
 
-                    b.Property<int?>("DonViThoiGian")
-                        .HasColumnType("int")
-                        .HasColumnName("donViThoiGian");
-
                     b.Property<decimal?>("GiaKhuyenMai")
-                        .HasColumnType("decimal(18, 2)")
-                        .HasColumnName("giaKhuyenMai");
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("GiaTien")
                         .HasColumnType("decimal(18, 2)")
@@ -349,6 +347,10 @@ namespace TKVL.Migrations
                     b.Property<int>("SoLuotXemCv")
                         .HasColumnType("int")
                         .HasColumnName("soLuotXemCV");
+
+                    b.Property<int>("SoNgayHieuLuc")
+                        .HasColumnType("int")
+                        .HasColumnName("soNgayHieuLuc");
 
                     b.Property<string>("TenGoi")
                         .IsRequired()

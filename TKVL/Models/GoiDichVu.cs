@@ -13,9 +13,10 @@ public partial class GoiDichVu
 
     public decimal GiaTien { get; set; }
 
-    public int SoNgayHieuLuc { get; set; }
+    public int? DonViThoiGian { get; set; }
 
     public int SoLuotXemCv { get; set; }
+    public decimal? GiaKhuyenMai { get; set; }
 
     public virtual ICollection<GiaoDich> GiaoDiches { get; set; } = new List<GiaoDich>();
 }
