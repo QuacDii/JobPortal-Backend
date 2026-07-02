@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260628112804_AddCVBuilderFeatures")]
+    partial class AddCVBuilderFeatures
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -502,10 +505,6 @@ namespace TKVL.Migrations
                     b.Property<string>("AnhThumbnail")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
-
-                    b.Property<string>("DuLieuMau")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsATS")
                         .HasColumnType("bit");

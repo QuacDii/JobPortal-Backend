@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260618115855_AddNgonNguAndTagsToMauCv")]
+    partial class AddNgonNguAndTagsToMauCv
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,40 +24,6 @@ namespace TKVL.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-
-            modelBuilder.Entity("TKVL.Models.CV_CauTrucMuc", b =>
-                {
-                    b.Property<int>("MaCauTruc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaCauTruc"));
-
-                    b.Property<bool>("IsVisible")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("LoaiMuc")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<int>("MaCV")
-                        .HasColumnType("int");
-
-                    b.Property<string>("TenMucHienThi")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("ThuTu")
-                        .HasColumnType("int");
-
-                    b.HasKey("MaCauTruc");
-
-                    b.HasIndex("MaCV");
-
-                    b.ToTable("CV_CauTrucMucs");
-                });
 
             modelBuilder.Entity("TKVL.Models.ChiTietViTri", b =>
                 {
@@ -204,11 +173,6 @@ namespace TKVL.Migrations
                         .HasColumnType("varchar(255)")
                         .HasColumnName("duongDan");
 
-                    b.Property<string>("FontChu")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
                     b.Property<bool>("IsPrimary")
                         .HasColumnType("bit");
 
@@ -228,11 +192,6 @@ namespace TKVL.Migrations
 
                     b.Property<DateTime?>("NgayCapNhat")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("NgonNgu")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)");
 
                     b.Property<string>("TieuDe")
                         .IsRequired()
@@ -502,10 +461,6 @@ namespace TKVL.Migrations
                     b.Property<string>("AnhThumbnail")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
-
-                    b.Property<string>("DuLieuMau")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsATS")
                         .HasColumnType("bit");
@@ -830,17 +785,6 @@ namespace TKVL.Migrations
                     b.ToTable("ViTri_KyNang", (string)null);
                 });
 
-            modelBuilder.Entity("TKVL.Models.CV_CauTrucMuc", b =>
-                {
-                    b.HasOne("TKVL.Models.Cv", "CV")
-                        .WithMany("CauTrucMucs")
-                        .HasForeignKey("MaCV")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CV");
-                });
-
             modelBuilder.Entity("TKVL.Models.ChiTietViTri", b =>
                 {
                     b.HasOne("TKVL.Models.NganhNghe", "MaNganhNavigation")
@@ -1085,8 +1029,6 @@ namespace TKVL.Migrations
 
             modelBuilder.Entity("TKVL.Models.Cv", b =>
                 {
-                    b.Navigation("CauTrucMucs");
-
                     b.Navigation("DonUngTuyens");
                 });
 

@@ -8,11 +8,15 @@ using TKVL.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Cấu hình Controllers và Swagger
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+}); ;
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 // Đăng ký Email Service
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<CloudinaryService>();
 
 // 2. Cấu hình Database
 builder.Services.AddDbContext<JobPortalDbContext>(options =>
