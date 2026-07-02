@@ -91,7 +91,6 @@ namespace TKVL.Controllers
             }
         }
 
-        // Đã sửa lại port thành 5173 khớp với ReactJS của bạn
         [HttpGet("PaymentCallBack")]
         public IActionResult PaymentCallBack([FromQuery] string resultCode, [FromQuery] string orderId)
         {

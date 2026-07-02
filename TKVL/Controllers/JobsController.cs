@@ -98,7 +98,8 @@ namespace TKVL.Controllers
                         address = jobDetail.MaTinNavigation!.MaCongTyNavigation!.DiaChi,
                         locationName = jobDetail.MaPhuongNavigation!.MaTpNavigation!.TenTp,
                         phuongXa = jobDetail.MaPhuongNavigation!.TenPhuong,
-                        deadline = jobDetail.MaTinNavigation!.NgayHetHan
+                        deadline = jobDetail.MaTinNavigation!.NgayHetHan,
+                        nganhNgheKhac = jobDetail.NganhNgheKhac
                     }
                 });
             }

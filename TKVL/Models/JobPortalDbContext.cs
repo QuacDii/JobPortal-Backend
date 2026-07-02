@@ -111,6 +111,10 @@ public partial class JobPortalDbContext : DbContext
                         j.IndexerProperty<int>("MaViTri").HasColumnName("maViTri");
                         j.IndexerProperty<int>("MaKyNang").HasColumnName("maKyNang");
                     });
+
+            entity.Property(e => e.NganhNgheKhac)
+              .HasMaxLength(150)
+              .HasColumnName("nganhNgheKhac");
         });
 
         modelBuilder.Entity<CongTy>(entity =>
@@ -269,6 +273,9 @@ public partial class JobPortalDbContext : DbContext
             entity.Property(e => e.TenKyNang)
                 .HasMaxLength(100)
                 .HasColumnName("tenKyNang");
+            entity.Property(e => e.TrangThai)
+                .HasDefaultValue(true)
+                .HasColumnName("trangThai");
         });
 
         modelBuilder.Entity<NganhNghe>(entity =>

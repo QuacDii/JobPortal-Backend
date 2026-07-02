@@ -22,7 +22,10 @@ builder.Services.AddDbContext<JobPortalDbContext>(options =>
 builder.Services.Configure<TKVL.DTOs.Payment.MomoConfig>(builder.Configuration.GetSection("MomoAPI"));
 builder.Services.AddScoped<TKVL.Services.IPaymentService, TKVL.Services.PaymentService>();
 
-// 4. Cấu hình CORS cho ReactJS
+// 4. Cấu hình dịch vụ Cloudinary
+builder.Services.AddScoped<ICloudinaryService, CloudinaryService>();
+
+// 5. Cấu hình CORS cho ReactJS
 builder.Services.AddCors(options => {
     options.AddPolicy("AllowReactApp",
         policy => policy.WithOrigins("http://localhost:5173")
@@ -30,6 +33,7 @@ builder.Services.AddCors(options => {
                         .AllowAnyHeader());
 });
 
+// 6. Cấu hình JWT Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

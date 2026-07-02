@@ -54,6 +54,11 @@ namespace TKVL.Migrations
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("moTaCongViec");
 
+                    b.Property<string>("NganhNgheKhac")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)")
+                        .HasColumnName("nganhNgheKhac");
+
                     b.Property<string>("QuyenLoi")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)")
@@ -408,6 +413,12 @@ namespace TKVL.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("tenKyNang");
+
+                    b.Property<bool?>("TrangThai")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("trangThai");
 
                     b.HasKey("MaKyNang")
                         .HasName("PK__KyNang__A5BBD21FE9BCB984");
