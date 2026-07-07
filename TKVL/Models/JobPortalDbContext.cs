@@ -51,6 +51,7 @@ public partial class JobPortalDbContext : DbContext
     public virtual DbSet<TinTuyenDung> TinTuyenDungs { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
+    public virtual DbSet<ChiTietPhanTichAi> ChiTietPhanTichAis { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -477,6 +478,32 @@ public partial class JobPortalDbContext : DbContext
                 .HasForeignKey(d => d.MaMau)
                 .HasConstraintName("FK_Cv_MauCV")
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ChiTietPhanTichAi>(entity =>
+        {
+            entity.HasKey(e => e.MaPhanTich);
+            entity.ToTable("ChiTietPhanTichAi");
+
+            entity.Property(e => e.MaPhanTich).HasColumnName("maPhanTich");
+            entity.Property(e => e.MaDon).HasColumnName("maDon");
+
+            entity.Property(e => e.DiemMatchingTong).HasColumnName("diemMatchingTong");
+            entity.Property(e => e.DiemKyNang).HasColumnName("diemKyNang");
+            entity.Property(e => e.DiemKinhNghiem).HasColumnName("diemKinhNghiem");
+            entity.Property(e => e.DiemLinhVuc).HasColumnName("diemLinhVuc");
+            entity.Property(e => e.DiemCapBac).HasColumnName("diemCapBac");
+
+            entity.Property(e => e.DiemManhTieuBieu).HasColumnName("diemManhTieuBieu");
+            entity.Property(e => e.DiemConThieu).HasColumnName("diemConThieu");
+            entity.Property(e => e.ThongTinHoSoTrichXuatJson).HasColumnName("thongTinHoSoTrichXuatJson");
+
+            // RÀNG BUỘC QUAN HỆ 1 - 1: DonUngTuyen là bảng chính, ChiTietPhanTichAi giữ khóa ngoại maDon
+            entity.HasOne(d => d.MaDonNavigation)
+                  .WithOne(p => p.ChiTietPhanTichAi)
+                  .HasForeignKey<ChiTietPhanTichAi>(d => d.MaDon)
+                  .OnDelete(DeleteBehavior.Cascade) // Khi nhà tuyển dụng xóa đơn ứng tuyển, bản phân tích AI tự động bay màu theo
+                  .HasConstraintName("FK_ChiTietPhanTichAi_DonUngTuyen");
         });
     }
 
