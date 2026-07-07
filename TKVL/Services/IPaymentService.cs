@@ -4,6 +4,6 @@ namespace TKVL.Services
 {
     public interface IPaymentService
     {
-        Task<MomoCreatePaymentResponse> CreatePaymentAsync(int maUser, decimal soTien);
+        Task<MomoCreatePaymentResponse> CreatePaymentAsync(int maUser, decimal soTien, int? maGoi);
     }
 }

@@ -15,15 +15,17 @@ namespace TKVL.Services
             _config = config.Value;
         }
 
-        public async Task<MomoCreatePaymentResponse> CreatePaymentAsync(int maUser, decimal soTien)
+        public async Task<MomoCreatePaymentResponse> CreatePaymentAsync(int maUser, decimal soTien, int? maGoi)
         {
             string orderId = DateTime.UtcNow.Ticks.ToString();
             string requestId = DateTime.UtcNow.Ticks.ToString();
-            string orderInfo = $"Nap tien vao vi TKVL - User: {maUser}";
+            string orderInfo = $"Nap tien vao vi dien tu JobsNow - Ma GD: {orderId}";
             string amount = ((int)soTien).ToString();
 
-            // MoMo yêu cầu extraData dạng Base64. Ta nhét maUser vào đây để lấy ra lúc xử lý IPN.
-            string extraData = Convert.ToBase64String(Encoding.UTF8.GetBytes(maUser.ToString()));
+            // MoMo yêu cầu extraData dạng Base64. Ta nhét maUser và maGoi vào đây để lấy ra lúc xử lý IPN.
+            string extraData = maGoi.HasValue
+                ? Convert.ToBase64String(Encoding.UTF8.GetBytes($"{maUser}|{maGoi.Value}"))
+                : Convert.ToBase64String(Encoding.UTF8.GetBytes(maUser.ToString()));
 
             // Format chuỗi chuẩn để băm chữ ký
             string rawHash = $"accessKey={_config.AccessKey}&amount={amount}&extraData={extraData}&ipnUrl={_config.NotifyUrl}&orderId={orderId}&orderInfo={orderInfo}&partnerCode={_config.PartnerCode}&redirectUrl={_config.ReturnUrl}&requestId={requestId}&requestType={_config.RequestType}";
