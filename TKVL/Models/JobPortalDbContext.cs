@@ -46,6 +46,8 @@ public partial class JobPortalDbContext : DbContext
 
     public virtual DbSet<ThanhPho> ThanhPhos { get; set; }
 
+    public virtual DbSet<CV_CauTrucMuc> CV_CauTrucMucs { get; set; }
+
     public virtual DbSet<TinDaLuu> TinDaLuus { get; set; }
 
     public virtual DbSet<TinTuyenDung> TinTuyenDungs { get; set; }

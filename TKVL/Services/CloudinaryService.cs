@@ -26,6 +26,7 @@ namespace TKVL.Services
         {
             if (file == null || file.Length == 0) return null;
 
+        // Đọc file ảnh dưới dạng Stream dữ liệu
             using var stream = file.OpenReadStream();
             var uploadParams = new ImageUploadParams
             {
