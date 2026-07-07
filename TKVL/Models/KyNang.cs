@@ -8,6 +8,7 @@ public partial class KyNang
     public int MaKyNang { get; set; }
 
     public string TenKyNang { get; set; } = null!;
+    public bool? TrangThai { get; set; }
 
     public virtual ICollection<ChiTietViTri> MaViTris { get; set; } = new List<ChiTietViTri>();
 }

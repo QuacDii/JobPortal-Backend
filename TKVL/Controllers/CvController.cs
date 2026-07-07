@@ -72,7 +72,8 @@ namespace TKVL.Controllers
                         NgayCapNhat = DateTime.Now,
                         DuongDan = dto.DuongDan,
                         FontChu = dto.FontChu,
-                        NgonNgu = dto.NgonNgu
+                        NgonNgu = dto.NgonNgu,
+                        CustomLayoutJson = dto.CustomLayoutJson
                     };
 
                     bool hasAnyCv = await _context.Cvs.AnyAsync(c => c.MaUser == dto.MaUser);
@@ -96,9 +97,8 @@ namespace TKVL.Controllers
                     existingCv.IsPublic = dto.IsPublic;
                     existingCv.NgayCapNhat = DateTime.Now;
                     existingCv.DuongDan = dto.DuongDan;
-
-                    // Cập nhật font chữ mới khi người dùng chỉnh sửa giao diện
                     existingCv.FontChu = dto.FontChu;
+                    existingCv.CustomLayoutJson = dto.CustomLayoutJson;
 
                     _context.Cvs.Update(existingCv);
                     await _context.SaveChangesAsync();
@@ -288,6 +288,7 @@ namespace TKVL.Controllers
             public string? DuongDan { get; set; }
             public string FontChu { get; set; } = string.Empty;
             public string NgonNgu { get; set; } = "vi";
+            public string? CustomLayoutJson { get; set; }
         }
     }
 }

@@ -12,8 +12,8 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    [Migration("20260531090247_AddThuvienCV")]
-    partial class AddThuvienCV
+    [Migration("20260629042909_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -303,8 +303,7 @@ namespace TKVL.Migrations
                     b.Property<string>("PhuongThuc")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .IsUnicode(false)
-                        .HasColumnType("varchar(50)")
+                        .HasColumnType("nvarchar(50)")
                         .HasColumnName("phuongThuc");
 
                     b.Property<decimal>("SoTien")
@@ -334,6 +333,14 @@ namespace TKVL.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaGoi"));
 
+                    b.Property<int?>("DonViThoiGian")
+                        .HasColumnType("int")
+                        .HasColumnName("donViThoiGian");
+
+                    b.Property<decimal?>("GiaKhuyenMai")
+                        .HasColumnType("decimal(18, 2)")
+                        .HasColumnName("giaKhuyenMai");
+
                     b.Property<decimal>("GiaTien")
                         .HasColumnType("decimal(18, 2)")
                         .HasColumnName("giaTien");
@@ -345,10 +352,6 @@ namespace TKVL.Migrations
                     b.Property<int>("SoLuotXemCv")
                         .HasColumnType("int")
                         .HasColumnName("soLuotXemCV");
-
-                    b.Property<int>("SoNgayHieuLuc")
-                        .HasColumnType("int")
-                        .HasColumnName("soNgayHieuLuc");
 
                     b.Property<string>("TenGoi")
                         .IsRequired()
@@ -408,6 +411,12 @@ namespace TKVL.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("tenKyNang");
+
+                    b.Property<bool?>("TrangThai")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("trangThai");
 
                     b.HasKey("MaKyNang")
                         .HasName("PK__KyNang__A5BBD21FE9BCB984");
@@ -697,6 +706,9 @@ namespace TKVL.Migrations
                         .IsUnicode(false)
                         .HasColumnType("varchar(255)")
                         .HasColumnName("matKhau");
+
+                    b.Property<DateTime?>("NgayHetHanGoi")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("NgayHetHanRefreshToken")
                         .HasColumnType("datetime2");

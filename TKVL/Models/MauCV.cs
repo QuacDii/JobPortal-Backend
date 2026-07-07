@@ -28,6 +28,8 @@ public partial class MauCV
 
     public string DuLieuMau { get; set; }
 
+    public string? LayoutJson { get; set; }
+
     // Liên kết 1-N (Một mẫu CV có nhiều CV con, nhiều bộ lọc, nhiều màu sắc)
     public virtual ICollection<Cv> Cvs { get; set; } = new List<Cv>();
     public virtual ICollection<PhanLoaiMau> PhanLoaiMaus { get; set; } = new List<PhanLoaiMau>();

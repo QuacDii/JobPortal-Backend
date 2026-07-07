@@ -65,7 +65,8 @@ namespace TKVL.Controllers
                     Colors = m.MauSacs.Select(c => c.MaHex).ToList(),
                     Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList(),
 
-                    DuLieuMau = m.DuLieuMau // Trả về chuỗi JSON chứa nội dung mẫu
+                    DuLieuMau = m.DuLieuMau,
+                    LayoutJson = m.LayoutJson
                 })
                 .FirstOrDefaultAsync();
 

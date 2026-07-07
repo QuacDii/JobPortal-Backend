@@ -1,37 +1,42 @@
 ﻿using CloudinaryDotNet;
 using CloudinaryDotNet.Actions;
 
-public class CloudinaryService
+namespace TKVL.Services
 {
-    private readonly Cloudinary _cloudinary;
-
-    public CloudinaryService(IConfiguration config)
+    public interface ICloudinaryService
     {
-        // Khởi tạo và kết nối tài khoản Cloudinary
-        var account = new Account(
-            config["CloudinarySettings:CloudName"],
-            config["CloudinarySettings:ApiKey"],
-            config["CloudinarySettings:ApiSecret"]
-        );
-        _cloudinary = new Cloudinary(account);
+        Task<string> UploadImageAsync(IFormFile file);
     }
 
-    public async Task<string> UploadImageAsync(IFormFile file)
+    public class CloudinaryService : ICloudinaryService
     {
-        if (file == null || file.Length == 0) return null;
+        private readonly Cloudinary _cloudinary;
+
+        public CloudinaryService(IConfiguration config)
+        {
+            var acc = new Account(
+                config["Cloudinary:CloudName"],
+                config["Cloudinary:ApiKey"],
+                config["Cloudinary:ApiSecret"]
+            );
+            _cloudinary = new Cloudinary(acc);
+        }
+
+        public async Task<string> UploadImageAsync(IFormFile file)
+        {
+            if (file == null || file.Length == 0) return null;
 
         // Đọc file ảnh dưới dạng Stream dữ liệu
-        using var stream = file.OpenReadStream();
-        var uploadParams = new ImageUploadParams
-        {
-            File = new FileDescription(file.FileName, stream),
-            // Tự động cắt ảnh vuông và tối ưu dung lượng 
-            Transformation = new Transformation().Width(400).Height(400).Crop("fill").Gravity("face")
-        };
+            using var stream = file.OpenReadStream();
+            var uploadParams = new ImageUploadParams
+            {
+                File = new FileDescription(file.FileName, stream),
+                Folder = "JobsNow/Logos", // Tạo thư mục riêng trên Cloudinary
+                Transformation = new Transformation().Width(500).Height(500).Crop("fill") // Tự động crop ảnh vuông đẹp mắt
+            };
 
-        var uploadResult = await _cloudinary.UploadAsync(uploadParams);
-
-        // Trả về đường link ảnh bảo mật dạng https://res.cloudinary.com/...
-        return uploadResult.SecureUrl.ToString();
+            var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+            return uploadResult.SecureUrl.ToString(); // Trả về link ảnh https
+        }
     }
 }

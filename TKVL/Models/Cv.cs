@@ -32,6 +32,8 @@ public partial class Cv
     [MaxLength(50)]
     public string FontChu { get; set; }
 
+    public string? CustomLayoutJson { get; set; }
+
     // Liên kết 1-N với CV_CauTrucMuc
     public virtual ICollection<CV_CauTrucMuc> CauTrucMucs { get; set; }
 

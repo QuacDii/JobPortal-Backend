@@ -24,6 +24,7 @@ public partial class ChiTietViTri
     public string QuyenLoi { get; set; } = null!;
 
     public int SoLuongTuyen { get; set; }
+    public string? NganhNgheKhac { get; set; }
 
     public virtual ICollection<DonUngTuyen> DonUngTuyens { get; set; } = new List<DonUngTuyen>();
 

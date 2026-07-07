@@ -11,7 +11,7 @@ namespace TKVL.Controllers
     [ApiController]
     public class JobsController : ControllerBase
     {
-        private readonly JobPortalDbContext _context; 
+        private readonly JobPortalDbContext _context;
 
         public JobsController(JobPortalDbContext context)
         {
@@ -26,14 +26,15 @@ namespace TKVL.Controllers
         {
             try
             {
-                // Đứng từ bảng Cha (TinTuyenDung) để kéo các vị trí con (ChiTietViTris) về
                 var campaigns = await _context.TinTuyenDungs
                     .Include(t => t.MaCongTyNavigation)
                     .Include(t => t.ChiTietViTris)
                         .ThenInclude(c => c.MaPhuongNavigation)
                             .ThenInclude(p => p.MaTpNavigation)
-                    .Where(t => t.TrangThai == 1) // Chỉ lấy chiến dịch đã duyệt
-                    .OrderByDescending(t => t.MaTin)
+                    .Where(t => t.TrangThai == 1)
+                    // 👉 THUẬT TOÁN ĐẨY TOP: Ưu tiên VIP (IsPromoted = true) lên đầu, sau đó mới xét ngày
+                    .OrderByDescending(t => t.IsPromoted)
+                    .ThenByDescending(t => t.MaTin)
                     .Select(t => new
                     {
                         maTin = t.MaTin,
@@ -41,7 +42,7 @@ namespace TKVL.Controllers
                         companyName = t.MaCongTyNavigation!.TenCongTy,
                         logo = t.MaCongTyNavigation!.Logo,
                         deadline = t.NgayHetHan,
-                        // Gom toàn bộ các vị trí con thuộc chiến dịch này vào một mảng
+                        isPromoted = t.IsPromoted, // Bổ sung cờ VIP để React hiện tag HOT
                         viTris = t.ChiTietViTris.Select(c => new {
                             id = c.MaViTri,
                             title = c.TenViTri,
@@ -49,6 +50,7 @@ namespace TKVL.Controllers
                             locationName = c.MaPhuongNavigation!.MaTpNavigation!.TenTp
                         }).ToList()
                     })
+                    .Take(20) // Phân trang cơ bản hiển thị trang chủ
                     .ToListAsync();
 
                 return Ok(new { success = true, data = campaigns });
@@ -58,58 +60,206 @@ namespace TKVL.Controllers
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
+
         // =================================================================
-        // API 2: GET /api/jobs/{id} (Lấy thông tin CHI TIẾT của 1 công việc cụ thể)
+        // API 2: GET /api/jobs/search (BỘ LỌC NÂNG CAO ĐA CHIỀU)
+        // =================================================================
+        [HttpGet("search")]
+        public async Task<IActionResult> SearchJobs([FromQuery] string? keyword, [FromQuery] int? maTP, [FromQuery] int? maNganh)
+        {
+            try
+            {
+                var query = _context.TinTuyenDungs
+                    .Include(t => t.MaCongTyNavigation)
+                    .Include(t => t.ChiTietViTris)
+                        .ThenInclude(c => c.MaPhuongNavigation)
+                            .ThenInclude(p => p.MaTpNavigation)
+                    .Where(t => t.TrangThai == 1)
+                    .AsQueryable();
+
+                // Lọc theo Keyword (Tìm trong Tên chiến dịch, Tên công ty hoặc Tên vị trí)
+                if (!string.IsNullOrEmpty(keyword))
+                {
+                    query = query.Where(t => t.TieuDeChienDich.Contains(keyword) ||
+                                             t.MaCongTyNavigation.TenCongTy.Contains(keyword) ||
+                                             t.ChiTietViTris.Any(c => c.TenViTri.Contains(keyword)));
+                }
+
+                // Lọc theo Thành phố (2 cấp)
+                if (maTP.HasValue)
+                {
+                    query = query.Where(t => t.ChiTietViTris.Any(c => c.MaPhuongNavigation.MaTp == maTP.Value));
+                }
+
+                // Lọc theo Ngành nghề
+                if (maNganh.HasValue)
+                {
+                    query = query.Where(t => t.ChiTietViTris.Any(c => c.MaNganh == maNganh.Value));
+                }
+
+                // Thực thi thuật toán đẩy Top và lấy dữ liệu
+                var results = await query
+                    .OrderByDescending(t => t.IsPromoted)
+                    .ThenByDescending(t => t.NgayHetHan)
+                    .Select(t => new
+                    {
+                        maTin = t.MaTin,
+                        tieuDeChienDich = t.TieuDeChienDich,
+                        companyName = t.MaCongTyNavigation!.TenCongTy,
+                        logo = t.MaCongTyNavigation!.Logo,
+                        deadline = t.NgayHetHan,
+                        isPromoted = t.IsPromoted,
+                        viTris = t.ChiTietViTris.Select(c => new {
+                            id = c.MaViTri,
+                            title = c.TenViTri,
+                            salaryRange = c.Luong,
+                            locationName = c.MaPhuongNavigation!.MaTpNavigation!.TenTp
+                        }).ToList()
+                    })
+                    .ToListAsync();
+
+                return Ok(new { success = true, data = results });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        // =================================================================
+        // API 3: GET /api/jobs/{id} (Lấy thông tin CHI TIẾT)
         // =================================================================
         [HttpGet("{id}")]
         public async Task<IActionResult> GetJobDetail(int id)
         {
+            var jobDetail = await _context.TinTuyenDungs
+                .Include(t => t.MaCongTyNavigation)
+                .Include(t => t.ChiTietViTris)
+                    .ThenInclude(c => c.MaPhuongNavigation) // 👉 BỔ SUNG: Join bảng Phường
+                        .ThenInclude(p => p.MaTpNavigation) // 👉 BỔ SUNG: Join bảng Thành Phố
+                .Where(t => t.MaTin == id)
+                .Select(t => new
+                {
+                    id = t.MaTin,
+                    title = t.TieuDeChienDich,
+                    companyName = t.MaCongTyNavigation.TenCongTy,
+                    logo = t.MaCongTyNavigation.Logo,
+                    deadline = t.NgayHetHan,
+
+                    // MAP DANH SÁCH VỊ TRÍ ĐỂ FRONTEND RENDER
+                    danhSachViTri = t.ChiTietViTris.Select(v => new
+                    {
+                        maViTri = v.MaViTri,
+                        tenViTri = v.TenViTri,
+                        luong = v.Luong,
+                        soLuongTuyen = v.SoLuongTuyen,
+                        moTaCongViec = v.MoTaCongViec,
+                        yeuCauUngVien = v.YeuCauUngVien,
+                        quyenLoi = v.QuyenLoi,
+
+                        // 👉 BỔ SUNG 2 DÒNG NÀY ĐỂ FRONTEND CÓ DỮ LIỆU ĐỊA ĐIỂM
+                        phuongXa = v.MaPhuongNavigation.TenPhuong,
+                        locationName = v.MaPhuongNavigation.MaTpNavigation.TenTp
+                    }).ToList()
+                })
+                .FirstOrDefaultAsync();
+
+            if (jobDetail == null)
+            {
+                return NotFound(new { success = false, message = "Không tìm thấy chiến dịch tuyển dụng." });
+            }
+
+            return Ok(new { success = true, data = jobDetail });
+        }
+        // =================================================================
+        // API 4: POST /api/jobs/{id}/bookmark (Lưu Tin Tuyển Dụng)
+        // =================================================================
+        [HttpPost("{id}/bookmark")]
+        public async Task<IActionResult> ToggleBookmark(int id, [FromHeader] int maUser)
+        {
             try
             {
-                var jobDetail = await _context.ChiTietViTris
-                    .Include(c => c.MaTinNavigation)
-                        .ThenInclude(t => t.MaCongTyNavigation)
-                    .Include(c => c.MaPhuongNavigation)
-                        .ThenInclude(p => p.MaTpNavigation)
-                    .FirstOrDefaultAsync(c => c.MaViTri == id);
+                // Note: Thực tế maUser nên được lấy từ JWT Claims: int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier))
+                var existing = await _context.TinDaLuus
+                    .FirstOrDefaultAsync(x => x.MaUser == maUser && x.MaViTri == id);
 
-                if (jobDetail == null)
+                if (existing != null)
                 {
-                    return NotFound(new { success = false, message = "Không tìm thấy công việc này trong hệ thống!" });
+                    _context.TinDaLuus.Remove(existing); // Hủy lưu
+                }
+                else
+                {
+                    _context.TinDaLuus.Add(new TinDaLuu
+                    {
+                        MaUser = maUser,
+                        MaViTri = id,
+                        NgayLuu = DateTime.Now
+                    });
                 }
 
-                // Trả ra toàn bộ ruột gan thông tin để làm trang chi tiết tuyển dụng
-                return Ok(new
-                {
-                    success = true,
-                    message = "Tải chi tiết công việc thành công!",
-                    data = new
-                    {
-                        id = jobDetail.MaViTri,
-                        title = jobDetail.TenViTri,
-                        salaryRange = jobDetail.Luong,
-                        soLuong = jobDetail.SoLuongTuyen,
-                        description = jobDetail.MoTaCongViec,
-                        requirements = jobDetail.YeuCauUngVien,
-                        benefits = jobDetail.QuyenLoi,
-                        companyName = jobDetail.MaTinNavigation!.MaCongTyNavigation!.TenCongTy,
-                        companyDescription = jobDetail.MaTinNavigation!.MaCongTyNavigation!.MoTa,
-                        logo = jobDetail.MaTinNavigation!.MaCongTyNavigation!.Logo,
-                        address = jobDetail.MaTinNavigation!.MaCongTyNavigation!.DiaChi,
-                        locationName = jobDetail.MaPhuongNavigation!.MaTpNavigation!.TenTp,
-                        phuongXa = jobDetail.MaPhuongNavigation!.TenPhuong,
-                        deadline = jobDetail.MaTinNavigation!.NgayHetHan
-                    }
-                });
+                await _context.SaveChangesAsync();
+                return Ok(new { success = true, isBookmarked = existing == null });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        // =================================================================
+        // DTO cho hàm Apply
+        // =================================================================
+        public class ApplyRequest
+        {
+            public int MaViTri { get; set; } // 👉 Bắt buộc phải có để hứng dữ liệu từ Dropdown ReactJS
+            public int MaCv { get; set; }
+            public string ThuGioiThieu { get; set; } = string.Empty;
+        }
+
+        // =================================================================
+        // API 5: POST /api/jobs/{id}/apply (Nộp Đơn Ứng Tuyển)
+        // =================================================================
+        [HttpPost("{id}/apply")]
+        public async Task<IActionResult> ApplyJob(int id, [FromBody] ApplyRequest request)
+        {
+            try
+            {
+                // 1. Xác định User ID một cách an toàn tuyệt đối từ CV thay vì dùng Header
+                var cv = await _context.Cvs.FindAsync(request.MaCv);
+                if (cv == null)
                 {
-                    success = false,
-                    message = "Đã xảy ra lỗi hệ thống khi tải chi tiết việc làm!",
-                    error = ex.Message
-                });
+                    return BadRequest(new { success = false, message = "Không tìm thấy hồ sơ CV trong hệ thống!" });
+                }
+
+                int currentUserId = cv.MaUser;
+
+                // 2. Kiểm tra xem ứng viên đã nộp vào vị trí NÀY chưa
+                var alreadyApplied = await _context.DonUngTuyens
+                    .AnyAsync(d => d.MaViTri == request.MaViTri && d.MaCvNavigation.MaUser == currentUserId);
+
+                if (alreadyApplied)
+                {
+                    return BadRequest(new { success = false, message = "Bạn đã ứng tuyển vị trí này rồi!" });
+                }
+
+                // 3. Tạo đơn ứng tuyển mới với đúng mã vị trí
+                var don = new DonUngTuyen
+                {
+                    MaViTri = request.MaViTri, // 👉 Lưu chuẩn xác vị trí thực tế
+                    MaCv = request.MaCv,
+                    ThuGioiThieu = request.ThuGioiThieu,
+                    NgayNop = DateTime.Now,
+                    TrangThai = 0 // 0: Đang chờ duyệt
+                };
+
+                _context.DonUngTuyens.Add(don);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { success = true, message = "Ứng tuyển thành công!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
     }

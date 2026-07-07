@@ -1,25 +1,24 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace TKVL.Migrations
 {
     /// <inheritdoc />
-    public partial class AddRefreshToken : Migration
+    public partial class AddDynamicLayoutJsonFields : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<DateTime>(
-                name: "NgayHetHanRefreshToken",
-                table: "User",
-                type: "datetime2",
+            migrationBuilder.AddColumn<string>(
+                name: "LayoutJson",
+                table: "MauCVs",
+                type: "nvarchar(max)",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
-                name: "RefreshToken",
-                table: "User",
+                name: "CustomLayoutJson",
+                table: "CV",
                 type: "nvarchar(max)",
                 nullable: true);
         }
@@ -28,12 +27,12 @@ namespace TKVL.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "NgayHetHanRefreshToken",
-                table: "User");
+                name: "LayoutJson",
+                table: "MauCVs");
 
             migrationBuilder.DropColumn(
-                name: "RefreshToken",
-                table: "User");
+                name: "CustomLayoutJson",
+                table: "CV");
         }
     }
 }

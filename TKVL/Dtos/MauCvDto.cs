@@ -11,8 +11,8 @@
         public List<string> Categories { get; set; }
         public string? NgonNgu { get; set; }
         public string? Tags { get; set; }
-
         public string? DuLieuMau { get; set; }
+        public string? LayoutJson { get; set; }
 
     }
 }
