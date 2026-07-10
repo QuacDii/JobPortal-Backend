@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
 using TKVL.Models;
+using TKVL.Services;
 
 namespace TKVL.Controllers
 {
@@ -12,10 +14,12 @@ namespace TKVL.Controllers
     public class JobsController : ControllerBase
     {
         private readonly JobPortalDbContext _context;
+        private readonly IServiceProvider _serviceProvider;
 
-        public JobsController(JobPortalDbContext context)
+        public JobsController(JobPortalDbContext context, IServiceProvider serviceProvider)
         {
             _context = context;
+            _serviceProvider = serviceProvider;
         }
 
         // =================================================================
@@ -217,7 +221,7 @@ namespace TKVL.Controllers
         }
 
         // =================================================================
-        // API 5: POST /api/jobs/{id}/apply (Nộp Đơn Ứng Tuyển)
+        // API 5: POST  (Nộp Đơn Ứng Tuyển)
         // =================================================================
         [HttpPost("{id}/apply")]
         public async Task<IActionResult> ApplyJob(int id, [FromBody] ApplyRequest request)
@@ -254,6 +258,12 @@ namespace TKVL.Controllers
 
                 _context.DonUngTuyens.Add(don);
                 await _context.SaveChangesAsync();
+
+                _ = Task.Run(async () => {
+                    using var scope = _serviceProvider.CreateScope();
+                    var aiService = scope.ServiceProvider.GetRequiredService<IAiAnalysisService>();
+                    await aiService.AnalyzeApplicationAsync(don.MaDon);
+                });
 
                 return Ok(new { success = true, message = "Ứng tuyển thành công!" });
             }

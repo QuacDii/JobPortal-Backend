@@ -87,23 +87,22 @@ namespace TKVL.Controllers
                 else
                 {
                     // TRƯỜNG HỢP 2: CẬP NHẬT CV CŨ
-                    var existingCv = await _context.Cvs.FindAsync(dto.MaCv);
-                    if (existingCv == null) return NotFound(new { message = "Không tìm thấy CV để cập nhật!" });
+                    var hasApplied = await _context.DonUngTuyens.AnyAsync(d => d.MaCv == dto.MaCv.Value);
+                    if (hasApplied)
+                    {
+                        return BadRequest(new { success = false, message = "Do CV đã được nộp để ứng tuyển nên không thể sửa!" });
+                    }
 
-                    existingCv.MaMau = dto.MaMau;
-                    existingCv.MaHex = dto.MaHex;
-                    existingCv.TieuDe = dto.TieuDe;
-                    existingCv.DuLieuCv = dto.DuLieuCv;
-                    existingCv.IsPublic = dto.IsPublic;
-                    existingCv.NgayCapNhat = DateTime.Now;
-                    existingCv.DuongDan = dto.DuongDan;
-                    existingCv.FontChu = dto.FontChu;
-                    existingCv.CustomLayoutJson = dto.CustomLayoutJson;
+                    var existingCv = await _context.Cvs.FindAsync(dto.MaCv);
+                    if (existingCv == null) return NotFound(new { success = false, message = "Không tìm thấy CV để cập nhật!" });
+
+                    existingCv.MaMau = dto.MaMau; existingCv.MaHex = dto.MaHex; existingCv.TieuDe = dto.TieuDe;
+                    existingCv.DuLieuCv = dto.DuLieuCv; existingCv.IsPublic = dto.IsPublic; existingCv.NgayCapNhat = DateTime.Now;
+                    existingCv.DuongDan = dto.DuongDan; existingCv.FontChu = dto.FontChu; existingCv.CustomLayoutJson = dto.CustomLayoutJson;
 
                     _context.Cvs.Update(existingCv);
                     await _context.SaveChangesAsync();
-
-                    return Ok(new { message = "Cập nhật hồ sơ thành công!", maCv = existingCv.MaCv });
+                    return Ok(new { success = true, message = "Cập nhật hồ sơ thành công!", maCv = existingCv.MaCv });
                 }
             }
             catch (Exception ex)
@@ -195,7 +194,14 @@ namespace TKVL.Controllers
             try
             {
                 var cv = await _context.Cvs.FindAsync(maCv);
-                if (cv == null) return NotFound(new { message = "Không tìm thấy CV để xóa!" });
+                if (cv == null) return NotFound(new { success = false, message = "Không tìm thấy CV để xóa!" });
+
+                // CHỐT CHẶN 2: Chỉ chặn xóa khi đã nộp đơn để tránh lỗi khóa ngoại Foreign Key SQL
+                var hasApplied = await _context.DonUngTuyens.AnyAsync(d => d.MaCv == maCv);
+                if (hasApplied)
+                {
+                    return BadRequest(new { success = false, message = "Do CV đã được nộp để ứng tuyển nên không thể xóa!" });
+                }
 
                 int userId = cv.MaUser;
                 bool wasPrimary = cv.IsPrimary;
@@ -203,6 +209,7 @@ namespace TKVL.Controllers
                 _context.Cvs.Remove(cv);
                 await _context.SaveChangesAsync();
 
+                // Nếu xóa CV mặc định nhưng kho vẫn còn CV khác thì tự động đôn bản ghi còn lại lên
                 if (wasPrimary)
                 {
                     var nextCv = await _context.Cvs
@@ -217,11 +224,11 @@ namespace TKVL.Controllers
                     }
                 }
 
-                return Ok(new { message = "Đã xóa CV khỏi hệ thống thành công!" });
+                return Ok(new { success = true, message = "Đã xóa CV khỏi hệ thống thành công!" });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Lỗi khi xóa CV!", error = ex.Message });
+                return StatusCode(500, new { success = false, message = "Lỗi khi xóa CV!", error = ex.Message });
             }
         }
 
@@ -250,23 +257,26 @@ namespace TKVL.Controllers
         {
             try
             {
-                var cv = await _context.Cvs.FindAsync(maCv);
-                if (cv == null) return NotFound(new { message = "Không tìm thấy CV để đổi tên!" });
+                // CHỐT CHẶN 3: Đã nộp đơn thì không được phép thay đổi tiêu đề hồ sơ
+                var hasApplied = await _context.DonUngTuyens.AnyAsync(d => d.MaCv == maCv);
+                if (hasApplied)
+                {
+                    return BadRequest(new { success = false, message = "Do CV đã được nộp để ứng tuyển nên không thể đổi tên!" });
+                }
 
-                if (string.IsNullOrEmpty(dto.TieuDe))
-                    return BadRequest(new { message = "Tiêu đề không được để trống!" });
+                var cv = await _context.Cvs.FindAsync(maCv);
+                if (cv == null) return NotFound(new { success = false, message = "Không tìm thấy CV để đổi tên!" });
+                if (string.IsNullOrEmpty(dto.TieuDe)) return BadRequest(new { success = false, message = "Tiêu đề không được để trống!" });
 
                 cv.TieuDe = dto.TieuDe;
                 cv.NgayCapNhat = DateTime.Now;
-
                 _context.Cvs.Update(cv);
                 await _context.SaveChangesAsync();
-
-                return Ok(new { message = "Đổi tên CV thành công!", tieuDe = cv.TieuDe });
+                return Ok(new { success = true, message = "Đổi tên CV thành công!", tieuDe = cv.TieuDe });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Lỗi hệ thống khi đổi tên CV!", error = ex.Message });
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi đổi tên CV!", error = ex.Message });
             }
         }
 

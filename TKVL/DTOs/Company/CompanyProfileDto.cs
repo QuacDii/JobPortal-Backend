@@ -8,5 +8,6 @@
         public string DiaChi { get; set; }
         public string MoTa { get; set; }
         public IFormFile? LogoFile { get; set; }
+        public string? ChuKyEmail { get; set; }
     }
 }

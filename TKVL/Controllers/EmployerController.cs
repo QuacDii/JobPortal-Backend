@@ -19,11 +19,13 @@ namespace TKVL.Controllers
     {
         private readonly JobPortalDbContext _context;
         private readonly ICloudinaryService _cloudinaryService;
+        private readonly IEmailService _emailService;
 
-        public EmployerController(JobPortalDbContext context, ICloudinaryService cloudinaryService)
+        public EmployerController(JobPortalDbContext context, ICloudinaryService cloudinaryService, IEmailService emailService)
         {
             _context = context;
             _cloudinaryService = cloudinaryService;
+            _emailService = emailService;
         }
 
         // ===================================================================
@@ -81,7 +83,8 @@ namespace TKVL.Controllers
             company.QuyMo = dto.QuyMo;
             company.DiaChi = dto.DiaChi;
             company.MoTa = dto.MoTa;
-            company.TrangThai = false; // Đưa về trạng thái chờ duyệt
+            company.TrangThai = false;
+            company.ChuKyEmail = dto.ChuKyEmail;
 
             if (dto.LogoFile != null)
             {
@@ -141,22 +144,60 @@ namespace TKVL.Controllers
         [HttpPut("applications/{maDon}/status")]
         public async Task<IActionResult> UpdateApplicationStatus(int maDon, [FromBody] UpdateStatusDto request)
         {
-            var donUngTuyen = await _context.DonUngTuyens.FindAsync(maDon);
+            // Tìm đơn ứng tuyển kèm theo thông tin User của ứng viên và thông tin Vị trí công việc
+            var donUngTuyen = await _context.DonUngTuyens
+                .Include(d => d.MaCvNavigation)
+                    .ThenInclude(cv => cv.MaUserNavigation)
+                .Include(d => d.MaViTriNavigation)
+                .FirstOrDefaultAsync(d => d.MaDon == maDon);
+
             if (donUngTuyen == null) return NotFound("Không tìm thấy đơn ứng tuyển.");
 
-            // Cập nhật trạng thái
-            donUngTuyen.TrangThai = request.Status;
-
-            // Cập nhật ghi chú nếu Nhà tuyển dụng có gõ vào Modal
+            donUngTuyen.TrangThai = (byte)request.Status;
             if (request.GhiChu != null)
             {
                 donUngTuyen.GhiChu = request.GhiChu;
             }
 
+            // Kiểm tra nếu chuyển trạng thái sang Hẹn phỏng vấn (mã 2)
+            if (request.Status == 2)
+            {
+                var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaCongTy == donUngTuyen.MaViTriNavigation.MaTinNavigation.MaCongTy);
+                string emailUngVien = donUngTuyen.MaCvNavigation?.MaUserNavigation?.Email;
+                string tenUngVien = donUngTuyen.MaCvNavigation?.MaUserNavigation?.HoTen ?? "Ứng viên";
+                string tenViTri = donUngTuyen.MaViTriNavigation?.TenViTri ?? "Vị trí đã ứng tuyển";
+
+                if (!string.IsNullOrEmpty(emailUngVien) && company != null)
+                {
+                    string chuDe = $"[{company.TenCongTy}] Thư mời phỏng vấn - Vị trí {tenViTri}";
+
+                    // 1. Đọc mẫu Email tùy chỉnh do công ty tự up/soạn trong DB
+                    // Nếu công ty chưa cấu hình mẫu riêng, hệ thống sẽ tự động dùng mẫu mặc định bên dưới
+                    string mauEmailTemplate = !string.IsNullOrEmpty(company.MauEmailInterview)
+                        ? company.MauEmailInterview
+                        : @"<div style='font-family: Arial; line-height: 1.6;'>
+                            <p>Chào {TenUngVien},</p>
+                            <p>Chúng tôi trân trọng mời bạn tham gia phỏng vấn vị trí <strong>{TenViTri}</strong>.</p>
+                            <p>• Thời gian: {ThoiGian}</p>
+                            <p>• Địa điểm: {DiaDiem}</p>
+                            <p>Trân trọng,</p>
+                            <p><strong>{TenCongTy}</strong></p>
+                        </div>";
+
+                    // 2. Thực hiện quét và thay thế các từ khóa quy ước bằng dữ liệu thực tế
+                    string noiDungGuiDi = mauEmailTemplate
+                        .Replace("{TenUngVien}", tenUngVien)
+                        .Replace("{TenViTri}", tenViTri)
+                        .Replace("{ThoiGian}", request.ThoiGian ?? "Sẽ thông báo sau")
+                        .Replace("{DiaDiem}", request.DiaDiem ?? "Sẽ thông báo sau")
+                        .Replace("{TenCongTy}", company.TenCongTy);
+
+                    // 3. Bắn email đã trộn nội dung đi
+                    await _emailService.SendEmailAsync(emailUngVien, chuDe, noiDungHtml: noiDungGuiDi);
+                }
+            }
+
             await _context.SaveChangesAsync();
-
-            // Ghi chú: Nếu Status == 2 (Hẹn PV) hoặc 3 (Từ chối), bạn có thể chèn code gọi IEmailService ở đây sau này.
-
             return Ok(new { success = true, message = "Cập nhật trạng thái thành công" });
         }
 
@@ -167,24 +208,36 @@ namespace TKVL.Controllers
 
             // Tìm mã công ty của user đang đăng nhập
             var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
-            if (company == null) return BadRequest(new { message = "Vui lòng cập nhật hồ sơ công ty trước khi xem tin đăng." });
 
-            // Lấy danh sách chi tiết vị trí (kèm chiến dịch Master) của công ty này
-            var myJobs = await _context.ChiTietViTris // Tên bảng có thể thay đổi tùy DB của bạn
+            // KỊCH BẢN 1: Nhà tuyển dụng chưa từng tạo hồ sơ công ty
+            if (company == null)
+            {
+                return Ok(new { status = "NO_PROFILE", message = "Cần khởi tạo hồ sơ công ty trước khi quản lý tin đăng." });
+            }
+
+            // KỊCH BẢN 2: Hồ sơ đã tạo nhưng đang ở trạng thái chờ duyệt (TrangThai == false)
+            if (company.TrangThai == false) // 0: Chờ duyệt, 1: Đã duyệt
+            {
+                return Ok(new { status = "PENDING_APPROVAL", message = "Hồ sơ doanh nghiệp đang chờ duyệt. Vui lòng quay lại sau." });
+            }
+
+            // KỊCH BẢN 3: Hồ sơ hợp lệ, tiến hành lấy danh sách tin tuyển dụng như cũ
+            var myJobs = await _context.ChiTietViTris
                 .Include(v => v.MaTinNavigation)
                 .Where(v => v.MaTinNavigation.MaCongTy == company.MaCongTy)
                 .Select(v => new
                 {
                     maViTri = v.MaViTri,
-                    tieuDe = v.MaTinNavigation.TieuDeChienDich + " - " + v.TenViTri, // Ghép Master và Detail
+                    tieuDe = v.MaTinNavigation.TieuDeChienDich + " - " + v.TenViTri,
                     ngayTao = v.MaTinNavigation.NgayHetHan,
-                    trangThai = v.MaTinNavigation.TrangThai, // 0: Chờ duyệt, 1: Đã duyệt
-                    soLuongUngVien = _context.DonUngTuyens.Count(d => d.MaViTri == v.MaViTri) // Đếm số đơn nộp
+                    trangThai = v.MaTinNavigation.TrangThai,
+                    soLuongUngVien = _context.DonUngTuyens.Count(d => d.MaViTri == v.MaViTri)
                 })
                 .OrderByDescending(v => v.ngayTao)
                 .ToListAsync();
 
-            return Ok(myJobs);
+            // Trả về kèm cờ trạng thái SUCCESS để Frontend nhận diện dữ liệu
+            return Ok(new { status = "SUCCESS", data = myJobs });
         }
 
         [HttpGet("hunt-cv")]

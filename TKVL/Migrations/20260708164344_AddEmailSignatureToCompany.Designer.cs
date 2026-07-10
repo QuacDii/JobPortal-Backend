@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260708164344_AddEmailSignatureToCompany")]
+    partial class AddEmailSignatureToCompany
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -214,9 +217,6 @@ namespace TKVL.Migrations
                     b.Property<int>("MaUser")
                         .HasColumnType("int")
                         .HasColumnName("maUser");
-
-                    b.Property<string>("MauEmailInterview")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("MoTa")
                         .HasColumnType("nvarchar(max)")

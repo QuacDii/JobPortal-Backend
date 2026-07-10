@@ -22,6 +22,8 @@ public partial class CongTy
     public string? Logo { get; set; }
 
     public bool TrangThai { get; set; }
+    public string? ChuKyEmail { get; set; }
+    public string? MauEmailInterview { get; set; }
 
     public virtual User MaUserNavigation { get; set; } = null!;
 

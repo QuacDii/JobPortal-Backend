@@ -1,16 +1,19 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using TKVL.Models;
 using TKVL.DTOs;
-using System.Text.Json;
 
 namespace TKVL.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]
+    [Authorize] // Bắt buộc đăng nhập token JWT cho toàn bộ Controller (trừ các hàm AllowAnonymous)
     public class RecruitmentController : ControllerBase
     {
         private readonly JobPortalDbContext _context;
@@ -20,101 +23,96 @@ namespace TKVL.Controllers
             _context = context;
         }
 
+        // =================================================================
         // 1. API TRẢ VỀ DANH SÁCH GỢI Ý KỸ NĂNG CHO FRONTEND
+        // =================================================================
         [HttpGet("skills")]
-        [AllowAnonymous] // Cho phép ai cũng gọi được để gợi ý (không cần token cũng được)
+        [AllowAnonymous]
         public async Task<IActionResult> GetStandardSkills()
         {
-            // Chỉ bốc những kỹ năng đã được duyệt (TrangThai = true)
             var skills = await _context.KyNangs
                 .Where(k => k.TrangThai == true)
                 .Select(k => new {
                     value = k.TenKyNang,
                     label = k.TenKyNang
-                }) // Format chuẩn cho component <Select> của Ant Design
+                })
                 .ToListAsync();
-
             return Ok(skills);
         }
 
-        // API LẤY DANH SÁCH NGÀNH NGHỀ
+        // =================================================================
+        // 2. API LẤY DANH SÁCH NGÀNH NGHỀ
+        // =================================================================
         [HttpGet("industries")]
         [AllowAnonymous]
         public async Task<IActionResult> GetIndustries()
         {
             var industries = await _context.NganhNghes
-                .Where(n => n.TrangThai == true) // Chỉ lấy ngành nghề đang Active
+                .Where(n => n.TrangThai == true)
                 .Select(n => new {
                     value = n.MaNganh,
                     label = n.TenNganh
                 })
                 .ToListAsync();
-
             return Ok(industries);
         }
 
-        // API LẤY DANH SÁCH TỈNH THÀNH & PHƯỜNG XÃ (Dạng Cây - Tree)
+        // =================================================================
+        // 3. API LẤY DANH SÁCH TỈNH THÀNH & PHƯỜNG XÃ DẠNG CÂY
+        // =================================================================
         [HttpGet("locations")]
         [AllowAnonymous]
         public async Task<IActionResult> GetLocations()
         {
-            // Load Tỉnh Thành kèm theo Phường Xã bên trong nó
             var locations = await _context.ThanhPhos
                 .Include(t => t.PhuongXas)
                 .Select(t => new {
-                    value = "TP_" + t.MaTp, // Thêm tiền tố để ID tỉnh không bị trùng với ID phường
+                    value = "TP_" + t.MaTp,
                     label = t.TenTp,
-                    // Danh sách Phường/Xã con
                     children = t.PhuongXas.Select(p => new {
                         value = p.MaPhuong,
                         label = p.TenPhuong
                     })
                 })
                 .ToListAsync();
-
             return Ok(locations);
         }
 
-        // 2. API ĐĂNG TIN CHIẾN DỊCH (MASTER - DETAIL)
+        // =================================================================
+        // 4. API ĐĂNG TIN CHIẾN DỊCH MASTER - DETAIL
+        // =================================================================
         [HttpPost("post-job")]
         public async Task<IActionResult> PostJobCampaign([FromBody] PostJobRequestDto request)
         {
             int maUser = GetCurrentUserId();
             var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
 
-            // Validate sơ bộ
             if (company == null)
                 return BadRequest(new { success = false, message = "Bạn chưa khởi tạo Hồ sơ doanh nghiệp!" });
-
             if (company.TrangThai == false)
                 return BadRequest(new { success = false, message = "Hồ sơ của bạn đang chờ duyệt. Không thể đăng tin lúc này." });
-
             if (request.DanhSachViTri == null || request.DanhSachViTri.Count == 0)
                 return BadRequest(new { success = false, message = "Vui lòng thêm ít nhất 1 vị trí công việc!" });
 
-            // KHỞI TẠO GIAO DỊCH (TRANSACTION)
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // BƯỚC 1: Lưu Chiến dịch (Master)
                 var newCampaign = new TinTuyenDung
                 {
                     MaCongTy = company.MaCongTy,
                     TieuDeChienDich = request.TieuDeChienDich,
                     NgayHetHan = request.NgayHetHan,
-                    TrangThai = 0, // Tin vừa đăng phải đưa vào trạng thái Chờ Admin duyệt
+                    TrangThai = 0,
                     IsPromoted = false
                 };
-
                 _context.TinTuyenDungs.Add(newCampaign);
-                await _context.SaveChangesAsync(); // Cần SaveChanges để EF Core sinh ra Mã Tin mới
+                await _context.SaveChangesAsync();
 
-                // BƯỚC 2: Lưu các Vị trí (Detail)
                 foreach (var posDto in request.DanhSachViTri)
                 {
                     var newPosition = new ChiTietViTri
                     {
-                        MaTin = newCampaign.MaTin, // Nối khóa ngoại về Master
+                        MaTin = newCampaign.MaTin,
                         TenViTri = posDto.TenViTri,
                         SoLuongTuyen = posDto.SoLuongTuyen,
                         Luong = posDto.Luong,
@@ -125,31 +123,25 @@ namespace TKVL.Controllers
                         MaPhuong = posDto.MaPhuong,
                         NganhNgheKhac = posDto.NganhNgheKhac
                     };
-
                     _context.ChiTietViTris.Add(newPosition);
                     await _context.SaveChangesAsync();
 
-                    // BƯỚC 3: Xử lý Kỹ năng (Folksonomy - Gắn tag động)
                     if (posDto.DanhSachKyNang != null && posDto.DanhSachKyNang.Any())
                     {
                         var kyNangEntities = new List<KyNang>();
-
                         foreach (var tenKN in posDto.DanhSachKyNang)
                         {
                             var keyword = tenKN.Trim();
                             if (string.IsNullOrEmpty(keyword)) continue;
 
-                            // Tìm trong DB xem kỹ năng này có chưa (Bất chấp hoa thường nhờ ToLower)
                             var existingSkill = await _context.KyNangs
                                 .FirstOrDefaultAsync(k => k.TenKyNang.ToLower() == keyword.ToLower());
-
                             if (existingSkill != null)
                             {
                                 kyNangEntities.Add(existingSkill);
                             }
                             else
                             {
-                                // Từ khóa hoàn toàn mới -> Lưu nháp (TrangThai = false)
                                 var newSkill = new KyNang
                                 {
                                     TenKyNang = keyword,
@@ -157,25 +149,230 @@ namespace TKVL.Controllers
                                 };
                                 _context.KyNangs.Add(newSkill);
                                 await _context.SaveChangesAsync();
-
                                 kyNangEntities.Add(newSkill);
                             }
                         }
-
-                        // Nhét List Kỹ năng vào Vị trí, EF Core tự động INSERT vào bảng trung gian ViTri_KyNang
                         newPosition.MaKyNangs = kyNangEntities;
                     }
                 }
-
                 await _context.SaveChangesAsync();
-                await transaction.CommitAsync(); // Xác nhận Transaction thành công!
-
+                await transaction.CommitAsync();
                 return Ok(new { success = true, message = "Đã gửi chiến dịch thành công! Vui lòng chờ Ban quản trị duyệt tin." });
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync(); // Nếu lỗi bất kỳ khâu nào, hủy mọi thay đổi trong DB
+                await transaction.RollbackAsync();
                 return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi lưu chiến dịch." });
+            }
+        }
+
+        // =================================================================================
+        // 5. API: Lấy phễu ứng viên kèm điểm AI (Màn hình Talent Pool & Danh sách xếp hạng)
+        // =================================================================================
+        [HttpGet("jobs/{maViTri}/applications")]
+        public async Task<IActionResult> GetApplicationsByJob(int maViTri, [FromQuery] int? minMatch, [FromQuery] int? maxMatch, [FromQuery] int? trangThai)
+        {
+            try
+            {
+                var query = _context.DonUngTuyens
+                    .Include(d => d.ChiTietPhanTichAi)
+                    .Include(d => d.MaCvNavigation)
+                    .Where(d => d.MaViTri == maViTri)
+                    .AsQueryable();
+
+                if (minMatch.HasValue && minMatch.Value > 0)
+                {
+                    query = query.Where(d => d.ChiTietPhanTichAi != null && d.ChiTietPhanTichAi.DiemMatchingTong >= minMatch.Value);
+                }
+                if (maxMatch.HasValue && maxMatch.Value < 100)
+                {
+                    query = query.Where(d => d.ChiTietPhanTichAi != null && d.ChiTietPhanTichAi.DiemMatchingTong <= maxMatch.Value);
+                }
+                if (trangThai.HasValue)
+                {
+                    query = query.Where(d => d.TrangThai == trangThai.Value);
+                }
+
+                // Nạp danh sách thô về bộ nhớ để xử lý chuỗi JSON bất đồng bộ
+                var rawList = await query
+                    .OrderByDescending(d => d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemMatchingTong : 0)
+                    .ThenByDescending(d => d.NgayNop)
+                    .ToListAsync();
+
+                var listApplications = rawList.Select(d => {
+                    string aiJson = d.ChiTietPhanTichAi?.ThongTinHoSoTrichXuatJson;
+
+                    // Nếu chuỗi trích xuất của AI trống hoặc rỗng, thực hiện lấy dữ liệu từ CV gốc của ứng viên
+                    if (string.IsNullOrEmpty(aiJson) || aiJson == "{}")
+                    {
+                        aiJson = MapCvBuilderToAiProfileJson(d.MaCvNavigation?.DuLieuCv);
+                    }
+
+                    return new
+                    {
+                        maDon = d.MaDon,
+                        maCv = d.MaCv,
+                        ngayNop = d.NgayNop,
+                        trangThai = d.TrangThai,
+                        ghiChu = d.GhiChu,
+                        diemMatchingTong = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemMatchingTong : 0,
+                        profileAiJson = aiJson,
+                        cvUrl = d.MaCvNavigation != null ? d.MaCvNavigation.DuongDan : null
+                    };
+                }).ToList();
+
+                return Ok(new { success = true, data = listApplications });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi tải phễu ứng viên!", error = ex.Message });
+            }
+        }
+
+        // =================================================================================
+        // 6. API: Chi tiết chấm điểm AI & Bóc tách CV (Màn hình chi tiết độc lập)
+        // =================================================================================
+        [HttpGet("applications/{maDon}/ai-details")]
+        public async Task<IActionResult> GetAiAnalysisDetail(int maDon)
+        {
+            try
+            {
+                var application = await _context.DonUngTuyens
+                    .Include(d => d.ChiTietPhanTichAi)
+                    .Include(d => d.MaCvNavigation)
+                    .FirstOrDefaultAsync(d => d.MaDon == maDon);
+
+                if (application == null)
+                {
+                    return NotFound(new { success = false, message = "Không tìm thấy đơn ứng tuyển!" });
+                }
+
+                if (application.TrangThai == 0)
+                {
+                    application.TrangThai = 1;
+                    await _context.SaveChangesAsync();
+                }
+
+                var aiData = application.ChiTietPhanTichAi;
+                string extractionJson = aiData?.ThongTinHoSoTrichXuatJson;
+
+                // Kích hoạt cơ chế phòng vệ nếu chuỗi thông tin AI trống
+                if (string.IsNullOrEmpty(extractionJson) || extractionJson == "{}")
+                {
+                    extractionJson = MapCvBuilderToAiProfileJson(application.MaCvNavigation?.DuLieuCv);
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        maDon = application.MaDon,
+                        trangThaiHienTai = application.TrangThai,
+                        ghiChuTuyenDung = application.GhiChu,
+                        thuGioiThieu = application.ThuGioiThieu,
+                        aiAnalysis = new
+                        {
+                            maPhanTich = aiData?.MaPhanTich ?? 0,
+                            diemMatchingTong = aiData?.DiemMatchingTong ?? 0,
+                            diemKyNang = aiData?.DiemKyNang ?? 0,
+                            diemKinhNghiem = aiData?.DiemKinhNghiem ?? 0,
+                            diemLinhVuc = aiData?.DiemLinhVuc ?? 0,
+                            diemCapBac = aiData?.DiemCapBac ?? 0,
+                            diemManhTieuBieu = aiData?.DiemManhTieuBieu ?? "Không có ghi nhận từ hệ thống",
+                            diemConThieu = aiData?.DiemConThieu ?? "Không có ghi nhận từ hệ thống",
+                            profileExtractedJson = extractionJson
+                        }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi tải chi tiết phân tích AI!", error = ex.Message });
+            }
+        }
+
+        // Hàm phụ trợ: Trích xuất và cấu trúc lại chuỗi dữ liệu CV Builder thô sang định dạng đối tượng Frontend đang chờ
+        private static string MapCvBuilderToAiProfileJson(string cvBuilderJson)
+        {
+            if (string.IsNullOrEmpty(cvBuilderJson)) return "{}";
+            try
+            {
+                // Làm sạch chuỗi văn bản khỏi ký tự ẩn BOM nếu có
+                string cleanJson = cvBuilderJson.Trim().Replace("\uFEFF", "");
+
+                if (cleanJson.StartsWith("\"") && cleanJson.EndsWith("\""))
+                {
+                    cleanJson = System.Text.RegularExpressions.Regex.Unescape(cleanJson.Substring(1, cleanJson.Length - 2));
+                }
+
+                using var doc = System.Text.Json.JsonDocument.Parse(cleanJson);
+                var root = doc.RootElement;
+
+                string hoTen = "Ứng viên hệ thống";
+                string jobTitle = "Chức danh chưa rõ";
+                string email = "N/A";
+                string sdt = "N/A";
+                string noiCuTru = "Chưa rõ";
+                string hocVan = "Chưa cập nhật";
+                var kyNangs = new List<string>();
+
+                // 1. Trích xuất thông tin cá nhân cơ bản
+                if (root.TryGetProperty("personalInfo", out var personalInfo))
+                {
+                    if (personalInfo.TryGetProperty("fullName", out var f)) hoTen = f.GetString() ?? hoTen;
+                    if (personalInfo.TryGetProperty("jobTitle", out var j)) jobTitle = j.GetString() ?? jobTitle;
+                    if (personalInfo.TryGetProperty("email", out var e)) email = e.GetString() ?? email;
+                    if (personalInfo.TryGetProperty("phone", out var p)) sdt = p.GetString() ?? sdt;
+                    if (personalInfo.TryGetProperty("address", out var a)) noiCuTru = a.GetString() ?? noiCuTru;
+                }
+
+                // 2. Trích xuất thông tin học vấn từ mảng lịch sử học tập
+                if (root.TryGetProperty("education", out var education) && education.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var item in education.EnumerateArray())
+                    {
+                        string school = item.TryGetProperty("school", out var sch) ? sch.GetString() : "";
+                        string major = item.TryGetProperty("major", out var maj) ? maj.GetString() : "";
+                        if (!string.IsNullOrEmpty(school))
+                        {
+                            hocVan = $"{school} - {major}";
+                            break;
+                        }
+                    }
+                }
+
+                // 3. Trích xuất chuỗi kỹ năng thô để cắt thành các phần tử mảng độc lập
+                if (root.TryGetProperty("skills", out var skillsProp))
+                {
+                    string rawSkills = skillsProp.GetString() ?? "";
+                    kyNangs = rawSkills.Split(new[] { '\n', ',', ';', '•', '-' }, StringSplitOptions.RemoveEmptyEntries)
+                                       .Select(s => s.Trim())
+                                       .Where(s => !string.IsNullOrEmpty(s) && !s.Contains("Ngôn ngữ:") && !s.Contains("Công cụ:") && !s.Contains("Định hướng:"))
+                                       .ToList();
+                }
+
+                if (!kyNangs.Any()) kyNangs.Add("Hồ sơ hệ thống");
+
+                // Đóng gói dữ liệu thành cấu trúc camelCase đồng bộ hoàn toàn với Frontend
+                var fallbackObj = new
+                {
+                    hoTen = hoTen,
+                    email = email,
+                    sdt = sdt,
+                    viTriHienTai = jobTitle,
+                    namKinhNghiem = "Xem CV gốc",
+                    noiCuTru = noiCuTru,
+                    kyNangNoiBat = kyNangs.ToArray(),
+                    hocVan = hocVan,
+                    chungChi = "Không có"
+                };
+
+                return Newtonsoft.Json.JsonConvert.SerializeObject(fallbackObj);
+            }
+            catch
+            {
+                return "{}";
             }
         }
 
@@ -185,6 +382,30 @@ namespace TKVL.Controllers
                      ?? User.Claims.FirstOrDefault(c => c.Type == "nameid")
                      ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
             return int.Parse(claim.Value);
+        }
+        // =================================================================
+        // CỔNG API TEST: POST /api/recruitment/applications/{maDon}/re-analyze
+        // =================================================================
+        [HttpPost("applications/{maDon}/re-analyze")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TriggerAiAnalysisManually(int maDon, [FromServices] Services.IAiAnalysisService aiAnalysisService)
+        {
+            try
+            {
+                // Gọi trực tiếp dịch vụ phân tích mà không cần thông qua luồng nộp đơn ngầm
+                bool result = await aiAnalysisService.AnalyzeApplicationAsync(maDon);
+
+                if (result)
+                {
+                    return Ok(new { success = true, message = "Đã kích hoạt cỗ máy AI chấm lại điểm thành công!" });
+                }
+
+                return BadRequest(new { success = false, message = "Quá trình phân tích thất bại, kiểm tra log console ở Backend." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using TKVL.Models;
 using TKVL.Services;
+using CloudinaryDotNet;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,13 +15,26 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 }); ;
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Đăng ký HttpClient và Service xử lý phân tích AI
+builder.Services.AddHttpClient<IAiService, AiService>();
+builder.Services.AddHttpClient<IAiAnalysisService, AiAnalysisService>();
+
 // Đăng ký Email Service
 builder.Services.AddScoped<IEmailService, EmailService>();
-builder.Services.AddScoped<CloudinaryService>();
 
 // 2. Cấu hình Database
 builder.Services.AddDbContext<JobPortalDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+var cloudinarySection = builder.Configuration.GetSection("Cloudinary");
+var account = new Account(
+    cloudinarySection["CloudName"],
+    cloudinarySection["ApiKey"],
+    cloudinarySection["ApiSecret"]
+);
+var cloudinary = new Cloudinary(account);
+builder.Services.AddSingleton(cloudinary);
 
 // 3. Cấu hình dịch vụ Thanh toán MoMo
 builder.Services.Configure<TKVL.DTOs.Payment.MomoConfig>(builder.Configuration.GetSection("MomoAPI"));
