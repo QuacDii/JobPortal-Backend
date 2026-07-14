@@ -30,8 +30,8 @@ public partial class MauCV
 
     public string? LayoutJson { get; set; }
 
-    // Liên kết 1-N (Một mẫu CV có nhiều CV con, nhiều bộ lọc, nhiều màu sắc)
+    public string? DanhSachMau { get; set; }
+
     public virtual ICollection<Cv> Cvs { get; set; } = new List<Cv>();
     public virtual ICollection<PhanLoaiMau> PhanLoaiMaus { get; set; } = new List<PhanLoaiMau>();
-    public virtual ICollection<MauSac_MauCV> MauSacs { get; set; } = new List<MauSac_MauCV>();
 }

@@ -431,6 +431,84 @@ namespace TKVL.Controllers
             return Ok(new { success = true, accessToken = newAccessToken, refreshToken = newRefreshToken });
         }
 
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "1")] // Chỉ nhà tuyển dụng (Role = 1)
+        [HttpGet("employer-status")]
+        public async Task<IActionResult> GetEmployerStatus()
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                {
+                    return Unauthorized(new { success = false, message = "Không xác định được danh tính." });
+                }
+
+                // Kiểm tra xem User này đã có bản ghi trong bảng CongTy chưa
+                var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == userId);
+
+                if (company == null)
+                {
+                    // Trường hợp 1: Chưa từng khai báo thông tin công ty
+                    return Ok(new { success = true, status = "NO_COMPANY" });
+                }
+
+                if (company.TrangThai == false) // false: Chưa được Admin duyệt
+                {
+                    // Trường hợp 2: Đã khai báo nhưng Admin chưa duyệt (hoặc từ chối)
+                    return Ok(new { success = true, status = "PENDING" });
+                }
+
+                // Trường hợp 3: Đã được Admin phê duyệt (TrangThai == true)
+                return Ok(new { success = true, status = "APPROVED" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "1")]
+        [HttpPost("onboarding")]
+        public async Task<IActionResult> SubmitOnboarding([FromBody] OnboardingDto dto)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                {
+                    return Unauthorized(new { success = false, message = "Không xác định được danh tính." });
+                }
+
+                // Tránh trường hợp gửi trùng lặp
+                var existingCompany = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == userId);
+                if (existingCompany != null)
+                {
+                    return BadRequest(new { success = false, message = "Hồ sơ công ty của bạn đã tồn tại trên hệ thống!" });
+                }
+
+                // Tạo mới bản ghi công ty với TrangThai = false (Chờ duyệt)
+                var newCompany = new CongTy
+                {
+                    MaUser = userId,
+                    TenCongTy = dto.TenCongTy,
+                    MaSoThue = dto.MaSoThue,
+                    DiaChi = dto.DiaChi,
+                    QuyMo = dto.QuyMo ?? "Dưới 50 nhân viên",
+                    MoTa = dto.MoTa ?? "",
+                    TrangThai = false // Mặc định là chưa duyệt để Admin xử lý
+                };
+
+                _context.CongTies.Add(newCompany);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { success = true, message = "Gửi hồ sơ doanh nghiệp thành công! Vui lòng đợi Admin kiểm duyệt." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
         public class TokenRequestDto
         {
             public string RefreshToken { get; set; } = null!;
@@ -462,6 +540,14 @@ namespace TKVL.Controllers
         {
             public string Token { get; set; } = null!;
             public string NewPassword { get; set; } = null!;
+        }
+        public class OnboardingDto
+        {
+            public string TenCongTy { get; set; } = null!;
+            public string MaSoThue { get; set; } = null!;
+            public string DiaChi { get; set; } = null!;
+            public string? QuyMo { get; set; }
+            public string? MoTa { get; set; }
         }
     }
 }
