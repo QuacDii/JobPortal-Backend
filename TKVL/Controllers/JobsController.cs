@@ -67,9 +67,8 @@ namespace TKVL.Controllers
 
         // =================================================================
         // API 2: GET /api/jobs/search (BỘ LỌC NÂNG CAO ĐA CHIỀU)
-        // =================================================================
         [HttpGet("search")]
-        public async Task<IActionResult> SearchJobs([FromQuery] string? keyword, [FromQuery] int? maTP, [FromQuery] int? maNganh)
+        public async Task<IActionResult> SearchJobs([FromQuery] string? keyword, [FromQuery] int? maTP, [FromQuery] int? maPhuong, [FromQuery] int? maNganh)
         {
             try
             {
@@ -81,7 +80,7 @@ namespace TKVL.Controllers
                     .Where(t => t.TrangThai == 1)
                     .AsQueryable();
 
-                // Lọc theo Keyword (Tìm trong Tên chiến dịch, Tên công ty hoặc Tên vị trí)
+                // Lọc theo Keyword
                 if (!string.IsNullOrEmpty(keyword))
                 {
                     query = query.Where(t => t.TieuDeChienDich.Contains(keyword) ||
@@ -89,9 +88,15 @@ namespace TKVL.Controllers
                                              t.ChiTietViTris.Any(c => c.TenViTri.Contains(keyword)));
                 }
 
-                // Lọc theo Thành phố (2 cấp)
-                if (maTP.HasValue)
+                // 👉 BỔ SUNG LOGIC LỌC PHƯỜNG/XÃ VÀ THÀNH PHỐ
+                if (maPhuong.HasValue)
                 {
+                    // Nếu người dùng chọn Phường/Xã cụ thể -> Lọc thẳng theo mã phường
+                    query = query.Where(t => t.ChiTietViTris.Any(c => c.MaPhuong == maPhuong.Value));
+                }
+                else if (maTP.HasValue)
+                {
+                    // Nếu người dùng CHỈ chọn Thành Phố (không chọn Phường) -> Lọc theo Thành Phố
                     query = query.Where(t => t.ChiTietViTris.Any(c => c.MaPhuongNavigation.MaTp == maTP.Value));
                 }
 
@@ -129,7 +134,6 @@ namespace TKVL.Controllers
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
-
         // =================================================================
         // API 3: GET /api/jobs/{id} (Lấy thông tin CHI TIẾT)
         // =================================================================
@@ -161,7 +165,6 @@ namespace TKVL.Controllers
                         yeuCauUngVien = v.YeuCauUngVien,
                         quyenLoi = v.QuyenLoi,
 
-                        // 👉 BỔ SUNG 2 DÒNG NÀY ĐỂ FRONTEND CÓ DỮ LIỆU ĐỊA ĐIỂM
                         phuongXa = v.MaPhuongNavigation.TenPhuong,
                         locationName = v.MaPhuongNavigation.MaTpNavigation.TenTp
                     }).ToList()
@@ -259,13 +262,43 @@ namespace TKVL.Controllers
                 _context.DonUngTuyens.Add(don);
                 await _context.SaveChangesAsync();
 
-                _ = Task.Run(async () => {
+                _ = Task.Run(async () =>
+                {
                     using var scope = _serviceProvider.CreateScope();
                     var aiService = scope.ServiceProvider.GetRequiredService<IAiAnalysisService>();
                     await aiService.AnalyzeApplicationAsync(don.MaDon);
                 });
 
                 return Ok(new { success = true, message = "Ứng tuyển thành công!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+        // =================================================================
+        // API 6: GET /api/PhuongXa?maTP=... (Lấy danh sách Phường/Xã theo Thành Phố)
+        // =================================================================
+        [HttpGet("/api/PhuongXa")] // Đặt fixed route có dấu "/" ở đầu để ghi đè route của Controller
+        public async Task<IActionResult> GetPhuongXaByThanhPho([FromQuery] int maTP)
+        {
+            try
+            {
+                var phuongXas = await _context.PhuongXas
+                    .Where(p => p.MaTp == maTP) // Lọc theo mã Thành Phố
+                    .Select(p => new {
+                        maPhuong = p.MaPhuong,
+                        tenPhuong = p.TenPhuong
+                    })
+                    .ToListAsync();
+
+                if (!phuongXas.Any())
+                {
+                    // Trả về mảng rỗng nếu thành phố này chưa có phường xã nào trong DB
+                    return Ok(new { success = true, data = new object[] { } });
+                }
+
+                return Ok(new { success = true, data = phuongXas });
             }
             catch (Exception ex)
             {
