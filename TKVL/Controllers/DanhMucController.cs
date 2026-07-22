@@ -66,5 +66,26 @@ namespace TKVL.Controllers
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
+        [HttpGet("/api/skills")] 
+        public async Task<IActionResult> GetSkills()
+        {
+            try
+            {
+                var data = await _context.KyNangs
+                    .Select(kn => new
+                    {
+                        maKyNang = kn.MaKyNang,
+                        tenKyNang = kn.TenKyNang
+                    })
+                    .OrderBy(kn => kn.tenKyNang)
+                    .ToListAsync();
+
+                return Ok(data);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
     }
 }

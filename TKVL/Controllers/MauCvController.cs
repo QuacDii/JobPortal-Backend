@@ -27,8 +27,9 @@ namespace TKVL.Controllers
                 query = query.Where(m => m.NgonNgu == ngonNgu);
             }
 
-            var templates = await query
-                .Select(m => new MauCvDto
+            // Bước A: Tải dữ liệu thô và chuỗi DanhSachMau gọn gàng từ SQL Server về RAM
+            var templatesRaw = await query
+                .Select(m => new
                 {
                     Id = m.MaMau,
                     Title = m.TenMau,
@@ -37,12 +38,25 @@ namespace TKVL.Controllers
                     IsATS = m.IsATS,
                     NgonNgu = m.NgonNgu,
                     Tags = m.Tags,
-                    Colors = m.MauSacs.Select(c => c.MaHex).ToList(),
-                    Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList(),
-
-                    DuLieuMau = null // Không load ở trang danh sách
+                    DanhSachMau = m.DanhSachMau, // 👈 Lấy chuỗi mã màu phẳng mới gộp
+                    Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList()
                 })
                 .ToListAsync();
+
+            // Bước B: Cắt chuỗi dấu phẩy thành List<string> trên RAM để trả về đúng DTO cho React đọc
+            var templates = templatesRaw.Select(m => new MauCvDto
+            {
+                Id = m.Id,
+                Title = m.Title,
+                Description = m.Description,
+                Image = m.Image,
+                IsATS = m.IsATS,
+                NgonNgu = m.NgonNgu,
+                Tags = m.Tags,
+                Colors = !string.IsNullOrEmpty(m.DanhSachMau) ? m.DanhSachMau.Split(',').ToList() : new List<string>(),
+                Categories = m.Categories,
+                DuLieuMau = null // Không load ở trang danh sách
+            }).ToList();
 
             return Ok(templates);
         }
@@ -51,9 +65,10 @@ namespace TKVL.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetMauCvById(int id)
         {
-            var template = await _context.MauCVs
+            // Bước A: Tải dữ liệu thô của mẫu CV cụ thể theo Id
+            var templateRaw = await _context.MauCVs
                 .Where(m => m.MaMau == id && m.TrangThai == true)
-                .Select(m => new MauCvDto
+                .Select(m => new
                 {
                     Id = m.MaMau,
                     Title = m.TenMau,
@@ -62,18 +77,33 @@ namespace TKVL.Controllers
                     IsATS = m.IsATS,
                     NgonNgu = m.NgonNgu,
                     Tags = m.Tags,
-                    Colors = m.MauSacs.Select(c => c.MaHex).ToList(),
+                    DanhSachMau = m.DanhSachMau, // 👈 Lấy chuỗi mã màu phẳng mới gộp
                     Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList(),
-
                     DuLieuMau = m.DuLieuMau,
                     LayoutJson = m.LayoutJson
                 })
                 .FirstOrDefaultAsync();
 
-            if (template == null)
+            if (templateRaw == null)
             {
                 return NotFound(new { success = false, message = "Không tìm thấy mẫu CV này!" });
             }
+
+            // Bước B: Map sang DTO và bẻ chuỗi ngăn cách bằng dấu phẩy thành mảng Colors
+            var template = new MauCvDto
+            {
+                Id = templateRaw.Id,
+                Title = templateRaw.Title,
+                Description = templateRaw.Description,
+                Image = templateRaw.Image,
+                IsATS = templateRaw.IsATS,
+                NgonNgu = templateRaw.NgonNgu,
+                Tags = templateRaw.Tags,
+                Colors = !string.IsNullOrEmpty(templateRaw.DanhSachMau) ? templateRaw.DanhSachMau.Split(',').ToList() : new List<string>(),
+                Categories = templateRaw.Categories,
+                DuLieuMau = templateRaw.DuLieuMau,
+                LayoutJson = templateRaw.LayoutJson
+            };
 
             return Ok(template);
         }

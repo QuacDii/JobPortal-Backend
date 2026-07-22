@@ -13,6 +13,5 @@
         public string? Tags { get; set; }
         public string? DuLieuMau { get; set; }
         public string? LayoutJson { get; set; }
-
     }
 }

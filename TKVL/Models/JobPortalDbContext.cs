@@ -20,7 +20,6 @@ public partial class JobPortalDbContext : DbContext
 
     public virtual DbSet<PhanLoaiMau> PhanLoaiMaus { get; set; }
 
-    public virtual DbSet<MauSac_MauCV> MauSacs { get; set; }
 
     public virtual DbSet<ChiTietViTri> ChiTietViTris { get; set; }
 
@@ -461,15 +460,6 @@ public partial class JobPortalDbContext : DbContext
                 .WithMany(p => p.PhanLoaiMaus)
                 .HasForeignKey(d => d.MaDanhMuc)
                 .HasConstraintName("FK_PhanLoaiMau_DanhMuc")
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<MauSac_MauCV>(entity =>
-        {
-            entity.HasOne(d => d.MauCVNavigation)
-                .WithMany(p => p.MauSacs)
-                .HasForeignKey(d => d.MaMau)
-                .HasConstraintName("FK_MauSac_MauCV")
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
