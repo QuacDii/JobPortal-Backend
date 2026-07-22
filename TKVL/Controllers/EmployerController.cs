@@ -1,13 +1,15 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using CloudinaryDotNet;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Linq;
 using TKVL.DTOs.Company; // Nơi chứa CandidateDto và UpdateStatusDto
 using TKVL.Models;
 using TKVL.Services;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace TKVL.Controllers
 {
@@ -55,7 +57,9 @@ namespace TKVL.Controllers
                 diaChi = company.DiaChi,
                 moTa = company.MoTa,
                 trangThai = company.TrangThai,
-                logo = company.Logo
+                logo = company.Logo,
+                chuKyEmail = company.ChuKyEmail,
+                mauEmailInterview = company.MauEmailInterview
             });
         }
 
@@ -85,6 +89,7 @@ namespace TKVL.Controllers
             company.MoTa = dto.MoTa;
             company.TrangThai = false;
             company.ChuKyEmail = dto.ChuKyEmail;
+            company.MauEmailInterview = dto.MauEmailInterview;
 
             if (dto.LogoFile != null)
             {
@@ -104,6 +109,7 @@ namespace TKVL.Controllers
             }
             catch (DbUpdateException ex)
             {
+                Console.WriteLine($"[LOI LUU DATABASE HO SO DOANH NGHIEP]: {ex.InnerException?.Message ?? ex.Message}");
                 if (ex.InnerException != null && ex.InnerException.Message.Contains("UQ__CongTy__"))
                 {
                     return BadRequest(new { success = false, message = "Mã số thuế này đã bị trùng!" });
@@ -149,9 +155,21 @@ namespace TKVL.Controllers
                 .Include(d => d.MaCvNavigation)
                     .ThenInclude(cv => cv.MaUserNavigation)
                 .Include(d => d.MaViTriNavigation)
+                    .ThenInclude(v => v.MaTinNavigation) 
                 .FirstOrDefaultAsync(d => d.MaDon == maDon);
 
             if (donUngTuyen == null) return NotFound("Không tìm thấy đơn ứng tuyển.");
+
+            // Nếu trạng thái mới truyền lên (request.Status) nhỏ hơn trạng thái hiện tại (application.TrangThai)
+            // Ngoại trừ trường hợp sửa sai: Đi lùi từ Từ chối (3) sang Hẹn phỏng vấn (2) để gửi lại email
+            if (request.Status < donUngTuyen.TrangThai && !(donUngTuyen.TrangThai == 3 && request.Status == 2))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Không thể chuyển ngược trạng thái đơn ứng tuyển về các bước trước đó trong phễu!"
+                });
+            }
 
             donUngTuyen.TrangThai = (byte)request.Status;
             if (request.GhiChu != null)
@@ -169,30 +187,75 @@ namespace TKVL.Controllers
 
                 if (!string.IsNullOrEmpty(emailUngVien) && company != null)
                 {
-                    string chuDe = $"[{company.TenCongTy}] Thư mời phỏng vấn - Vị trí {tenViTri}";
+                    string chuDe = $"[{company.TenCongTy}] Thư mời tham gia phỏng vấn - Vị trí {tenViTri}";
 
-                    // 1. Đọc mẫu Email tùy chỉnh do công ty tự up/soạn trong DB
-                    // Nếu công ty chưa cấu hình mẫu riêng, hệ thống sẽ tự động dùng mẫu mặc định bên dưới
-                    string mauEmailTemplate = !string.IsNullOrEmpty(company.MauEmailInterview)
+                    // 1. CỐ ĐỊNH: Khung layout Branding cao cấp (Master Wrapper Layout) luôn luôn sử dụng để bọc ngoài thư
+                    string masterLayout = @"<div style='max-width: 620px; margin: 20px auto; font-family: ""Segoe UI"", Arial, sans-serif; color: #333333; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.06);'>
+                        <div style='background-color: #1e3a8a; padding: 26px; text-align: center;'>
+                            <h2 style='color: #ffffff; margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.5px;'>THƯ MỜI PHỎNG VẤN</h2>
+                        </div>
+                        <div style='padding: 32px 24px; background-color: #ffffff; font-size: 15px; line-height: 1.7; color: #334155;'>
+                            {NoiDungThuCuaDoanhNghiep}
+                        </div>
+                        <div style='background-color: #f8fafc; padding: 20px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #e2e8f0;'>
+                            Hệ thống mạng lưới việc làm cao cấp <strong style='color: #1e3a8a;'>JobsNow System</strong>
+                        </div>
+                    </div>";
+
+                    // 2. Đọc nội dung thư từ NTD soạn, nếu trống thì dùng văn bản mẫu mặc định của hệ thống
+                    string thongDiepGoc = !string.IsNullOrEmpty(company.MauEmailInterview)
                         ? company.MauEmailInterview
-                        : @"<div style='font-family: Arial; line-height: 1.6;'>
-                            <p>Chào {TenUngVien},</p>
-                            <p>Chúng tôi trân trọng mời bạn tham gia phỏng vấn vị trí <strong>{TenViTri}</strong>.</p>
-                            <p>• Thời gian: {ThoiGian}</p>
-                            <p>• Địa điểm: {DiaDiem}</p>
-                            <p>Trân trọng,</p>
-                            <p><strong>{TenCongTy}</strong></p>
-                        </div>";
+                        : "Chào {TenUngVien},\n\nCông ty {TenCongTy} trân trọng mời bạn tham gia phỏng vấn vị trí {TenViTri}.\n• Thời gian: {ThoiGian}\n• Địa điểm: {DiaDiem}\n\n{LinkBaiTest}\n\nTrân trọng,\n{ChuKyEmail}";
 
-                    // 2. Thực hiện quét và thay thế các từ khóa quy ước bằng dữ liệu thực tế
-                    string noiDungGuiDi = mauEmailTemplate
+                    // GIẢI QUYẾT TẬN GỐC: Đổi toàn bộ dấu Enter (\n) thành thẻ xuống dòng HTML (<br/>) để giữ nguyên định dạng của NTD
+                    string thongDiepHtml = thongDiepGoc.Replace("\n", "<br/>");
+
+                    // 3. Chuẩn hóa nút bấm làm bài Test dạng Inline (Nằm vừa khít trong câu văn của NTD)
+                    string testLinkHtml = "";
+                    if (!string.IsNullOrEmpty(request.LinkBaiTest))
+                    {
+                        testLinkHtml = $"<a href='{request.LinkBaiTest}' target='_blank' style='background-color: #10b981; color: #ffffff; padding: 6px 14px; text-decoration: none; display: inline-block; font-size: 13px; font-weight: bold; border-radius: 4px; margin: 0 4px; box-shadow: 0 2px 4px rgba(16,185,129,0.15);'>🚀 BẮT ĐẦU LÀM BÀI TEST</a>";
+                    }
+
+                    // 4. Chuẩn hóa khối chữ ký doanh nghiệp
+                    string chuKyHtml = !string.IsNullOrEmpty(company.ChuKyEmail)
+                        ? $"<div style='margin-top: 20px; padding-top: 12px; border-top: 1px dashed #cbd5e1; color: #475569; font-size: 13px;'>{company.ChuKyEmail.Replace("\n", "<br/>")}</div>"
+                        : "";
+
+                    // 5. Tiến hành quét trộn dữ liệu động vào nội dung thư
+                    string bodyText = thongDiepHtml
                         .Replace("{TenUngVien}", tenUngVien)
                         .Replace("{TenViTri}", tenViTri)
                         .Replace("{ThoiGian}", request.ThoiGian ?? "Sẽ thông báo sau")
                         .Replace("{DiaDiem}", request.DiaDiem ?? "Sẽ thông báo sau")
                         .Replace("{TenCongTy}", company.TenCongTy);
 
-                    // 3. Bắn email đã trộn nội dung đi
+                    // 6. Cơ chế phòng vệ vị trí đặt từ khóa của Nhà tuyển dụng
+                    // Nếu trong văn bản có ghi sẵn từ khóa {LinkBaiTest} -> Đổ nút bấm vào đúng chỗ đó
+                    if (bodyText.Contains("{LinkBaiTest}"))
+                    {
+                        bodyText = bodyText.Replace("{LinkBaiTest}", testLinkHtml);
+                    }
+                    else if (!string.IsNullOrEmpty(testLinkHtml))
+                    {
+                        // Nếu NTD quên dán từ khóa mà đơn có link test -> Tự động append xuống cuối thư cho an toàn
+                        bodyText += "<br/><br/>" + testLinkHtml;
+                    }
+
+                    // Xử lý vị trí đặt từ khóa {ChuKyEmail} tương tự
+                    if (bodyText.Contains("{ChuKyEmail}"))
+                    {
+                        bodyText = bodyText.Replace("{ChuKyEmail}", chuKyHtml);
+                    }
+                    else
+                    {
+                        bodyText += chuKyHtml;
+                    }
+
+                    // 7. Nhét toàn bộ phần ruột đã trộn xong xuôi vào Khung layout tổng
+                    string noiDungGuiDi = masterLayout.Replace("{NoiDungThuCuaDoanhNghiep}", bodyText);
+
+                    // Bắn Email HTML hoàn thiện đi
                     await _emailService.SendEmailAsync(emailUngVien, chuDe, noiDungHtml: noiDungGuiDi);
                 }
             }
@@ -240,52 +303,96 @@ namespace TKVL.Controllers
             return Ok(new { status = "SUCCESS", data = myJobs });
         }
 
+        // API săn tìm ứng viên tích hợp bộ lọc nâng cao (Ngành nghề, Kỹ năng, Từ khóa)
+        // API săn tìm ứng viên công khai tích hợp bộ lọc ngành nghề cố định và kỹ năng nâng cao
         [HttpGet("hunt-cv")]
-        public async Task<IActionResult> HuntCv(string keyword = "")
+        public async Task<IActionResult> HuntCv(string keyword = "", string nganhNghe = "", string skills = "", string nganhNgheKhac = "")
         {
-            int currentEmployerId = GetCurrentUserId();
+            int currentEmployerId = GetCurrentUserId();  
 
-            // 1. Lấy danh sách CV công khai
-            var query = _context.Cvs.Include(c => c.MaUserNavigation).Where(c => c.IsPublic == true);
+            var user = await _context.Users.FindAsync(currentEmployerId);  
+            if (user == null) return Unauthorized(new { success = false, message = "Phiên đăng nhập hết hạn." });  
+
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentEmployerId);  
+            if (company == null) return BadRequest(new { success = false, message = "Tài khoản doanh nghiệp chưa khởi tạo hồ sơ công ty." });  
+
+            // Xác thực hạn dùng của gói Premium trên tài khoản tuyển dụng
+            if (!user.NgayHetHanGoi.HasValue || user.NgayHetHanGoi.Value < DateTime.Now)  
+            {
+                return Ok(new { success = false, isPremium = false, luotXemCvConLai = 0, data = new List<HuntCvDto>(), message = "Gói dịch vụ tìm ứng viên đã hết hạn." });  
+            }
+
+            // Khởi tạo luồng truy vấn gốc trên bảng CV công khai
+            var query = _context.Cvs.Include(c => c.MaUserNavigation).Where(c => c.IsPublic == true);  
+
+            // 1. Lọc theo Từ khóa chính (Khớp tên ứng viên hoặc tiêu đề CV)
             if (!string.IsNullOrEmpty(keyword))
-                query = query.Where(c => c.TieuDe.Contains(keyword));
+                query = query.Where(c => c.TieuDe.Contains(keyword) || c.MaUserNavigation.HoTen.Contains(keyword));
 
-            var cvList = await query.ToListAsync();
+            // 2. Lọc theo Kỹ năng / Công nghệ (Quét trực tiếp trong chuỗi JSON của CV)
+            if (!string.IsNullOrEmpty(skills))
+                query = query.Where(c => c.DuLieuCv.Contains(skills));
 
-            // 2. Kiểm tra xem Employer đã mở khóa CV nào chưa
+            // 3. Lọc theo Danh mục ngành nghề (Xử lý kịch bản chọn ngành nghề cụ thể hoặc tự nhập từ khóa Khác)
+            if (!string.IsNullOrEmpty(nganhNghe))
+            {
+                if (nganhNghe == "Khác" && !string.IsNullOrEmpty(nganhNgheKhac))
+                {
+                    query = query.Where(c => c.DuLieuCv.Contains(nganhNgheKhac));
+                }
+                else if (nganhNghe != "Khác")
+                {
+                    query = query.Where(c => c.DuLieuCv.Contains(nganhNghe));
+                }
+            }
+
+            // Loại bỏ các CV đã ứng tuyển vào công ty này để tiết kiệm lượt mở khóa
+            query = query.Where(c => !_context.DonUngTuyens
+                .Any(d => d.MaCv == c.MaCv && d.MaViTriNavigation.MaTinNavigation.MaCongTy == company.MaCongTy));  
+
+            var cvList = await query.ToListAsync();  
+
             var unlockedCvIds = await _context.LichSuMoKhoaCvs
-                .Where(l => l.MaUser == currentEmployerId)
-                .Select(l => l.MaCv)
-                .ToListAsync();
+                .Where(l => l.MaUser == currentEmployerId) 
+                .Select(l => l.MaCv) 
+                .ToListAsync();  
 
             var results = cvList.Select(c => new HuntCvDto
             {
                 MaCv = c.MaCv,
+                 
                 HoTen = c.MaUserNavigation.HoTen,
+                 
                 IsUnlocked = unlockedCvIds.Contains(c.MaCv),
-                // Nếu chưa mở khóa thì che mờ dữ liệu
-                Email = unlockedCvIds.Contains(c.MaCv) ? c.MaUserNavigation.Email : "nguyen***@gmail.com",
-                SoDienThoai = unlockedCvIds.Contains(c.MaCv) ? "0912***678" : "0912***678"
-            }).ToList();
+                 
+                Email = unlockedCvIds.Contains(c.MaCv) ? c.MaUserNavigation.Email : "hoang***@gmail.com",
+                 
+                CvUrl = c.DuongDan 
+            }).ToList();  
 
-            return Ok(results);
+            return Ok(new { success = true, isPremium = true, luotXemCvConLai = user.LuotXemCvConLai, data = results });  
         }
 
+        // API mo khoa thong tin lien he cua ung vien
         [HttpPost("unlock-cv/{maCv}")]
         public async Task<IActionResult> UnlockCv(int maCv)
         {
             int currentEmployerId = GetCurrentUserId();
-
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
                 var user = await _context.Users.FindAsync(currentEmployerId);
-                if (user.LuotXemCvConLai <= 0) return BadRequest("Bạn đã hết lượt mở khóa CV!");
+                if (user == null) return Unauthorized(new { success = false, message = "Phiên đăng nhập hết hạn." });
 
-                // Trừ lượt
+                // Kiem tra thoi han goi va so luong luot xem con lai cua doanh nghiep
+                bool isUserValid = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value >= DateTime.Now;
+                if (!isUserValid || user.LuotXemCvConLai <= 0)
+                {
+                    return BadRequest("Gói dịch vụ đã hết hạn sử dụng hoặc tài khoản đã hết lượt mở khóa hồ sơ!");
+                }
+
                 user.LuotXemCvConLai -= 1;
 
-                // Lưu vết mở khóa
                 _context.LichSuMoKhoaCvs.Add(new LichSuMoKhoaCV
                 {
                     MaUser = currentEmployerId,
@@ -298,12 +405,34 @@ namespace TKVL.Controllers
 
                 return Ok(new { success = true, message = "Mở khóa thành công!" });
             }
-            catch
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return StatusCode(500, "Lỗi hệ thống.");
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi mở khóa.", error = ex.Message });
             }
         }
+
+        // API lấy danh sách tất cả các ngành nghề động từ bảng NganhNghe trong DB
+        [HttpGet("hunt-cv/industries")]
+        public async Task<IActionResult> GetDatabaseIndustries()
+        {
+            // Truy vấn lấy danh sách tên ngành nghề, sắp xếp theo mã ngành (hoặc thứ tự trong DB)
+            // Lưu ý: Thay đổi "TenNganh" hoặc "MaNganh" thành đúng tên thuộc tính trong Model của bạn nếu có khác biệt
+            var industries = await _context.NganhNghes
+                .OrderBy(n => n.MaNganh)
+                .Select(n => n.TenNganh)
+                .ToListAsync();
+
+            // Cơ chế phòng vệ: Đảm bảo luôn có tùy chọn "Khác" ở cuối danh sách 
+            // để kích hoạt ô nhập liệu thông minh ở giao diện Frontend
+            if (!industries.Contains("Khác"))
+            {
+                industries.Add("Khác");
+            }
+
+            return Ok(industries);
+        }
+
         // ===================================================================
         // HÀM HỖ TRỢ DÙNG CHUNG
         // ===================================================================

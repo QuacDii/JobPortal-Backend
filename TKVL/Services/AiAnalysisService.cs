@@ -41,36 +41,19 @@ namespace TKVL.Services
                 var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaCongTy == maCongTy);
                 if (company == null) return false;
 
-                // Lấy giao dịch MUA GÓI thành công mới nhất (Bắt buộc g.MaGoi phải có giá trị)
-                var daMuaGoi = await _context.GiaoDiches
+                // TỐI ƯU: Tìm thẳng giao dịch MUA GÓI VIP thành công, loại bỏ rủi ro sắp xếp sai milli-giây
+                var daMuaGoiPremium = await _context.GiaoDiches
                     .Include(g => g.MaGoiNavigation)
-                    .Where(g => g.MaUser == company.MaUser && g.TrangThai == true && g.MaGoi != null)
-                    .OrderByDescending(g => g.NgayGd)
-                    .FirstOrDefaultAsync();
-
-                bool isPremium = false;
-
-                // Kiểm tra thực thể gói điều hướng có tồn tại hay không
-                if (daMuaGoi != null && daMuaGoi.MaGoiNavigation != null)
-                {
-                    var goiDichVu = daMuaGoi.MaGoiNavigation;
-
-                    // Đối chiếu khớp với ID gói 3 (LoaiGoi = 2, DonViThoiGian = 6) trong DB của bác
-                    if (goiDichVu.LoaiGoi == 2 && goiDichVu.DonViThoiGian == 6)
-                    {
-                        isPremium = true;
-                    }
-                    // Đối chiếu khớp với ID gói 4 (LoaiGoi = 3, DonViThoiGian = 1) trong DB của bác
-                    else if (goiDichVu.LoaiGoi == 3 && goiDichVu.DonViThoiGian == 1)
-                    {
-                        isPremium = true;
-                    }
-                }
+                    .AnyAsync(g => g.MaUser == company.MaUser
+                                && g.TrangThai == true
+                                && g.MaGoi != null
+                                && ((g.MaGoiNavigation.LoaiGoi == 2 && g.MaGoiNavigation.DonViThoiGian == 6)
+                                 || (g.MaGoiNavigation.LoaiGoi == 3 && g.MaGoiNavigation.DonViThoiGian == 1)));
 
                 // ===================================================================
                 // KỊCH BẢN 1: Nhà tuyển dụng không dùng gói Premium -> Ghi nhận bản ghi trống
                 // ===================================================================
-                if (!isPremium)
+                if (!daMuaGoiPremium)
                 {
                     var emptyAnalysis = new ChiTietPhanTichAi
                     {
@@ -89,6 +72,7 @@ namespace TKVL.Services
                     await _context.SaveChangesAsync();
                     return true;
                 }
+
 
                 // ===================================================================
                 // KỊCH BẢN 2: Đủ điều kiện gói Premium -> Tiến hành bóc tách và gọi AI
