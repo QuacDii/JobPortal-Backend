@@ -9,5 +9,6 @@
         public string MoTa { get; set; }
         public IFormFile? LogoFile { get; set; }
         public string? ChuKyEmail { get; set; }
+        public string? MauEmailInterview { get; set; }
     }
 }
