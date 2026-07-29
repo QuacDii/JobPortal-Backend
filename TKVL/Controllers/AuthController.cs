@@ -42,7 +42,6 @@ namespace TKVL.Controllers
                     return BadRequest(new { success = false, message = "Mã xác thực Google không hợp lệ hoặc đã hết hạn!" });
                 }
 
-                // Đọc dữ liệu JSON trả về từ Google UserInfo Endpoint
                 var payload = await googleResponse.Content.ReadFromJsonAsync<GoogleUserInfoDto>();
                 if (payload == null)
                 {
@@ -51,29 +50,25 @@ namespace TKVL.Controllers
 
                 string email = payload.Email;
                 string name = payload.Name;
-                string googleId = payload.Sub; // ID duy nhất của tài khoản Google đó 
+                string googleId = payload.Sub;
                 string avatar = payload.Picture;
 
-                // =================================================================
-                // 2.Kiểm tra xem User này đã từng đăng nhập/đăng ký chưa 
-                // =================================================================
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.GoogleId == googleId || u.Email == email);
 
                 if (user == null)
                 {
-                    // Trường hợp người dùng mới toanh: Tự động đăng ký (INSERT) một tài khoản mới 
                     user = new User
                     {
                         Email = email,
-                        MatKhau = null, // Đăng nhập MXH thì không cần lưu mật khẩu truyền thống 
+                        MatKhau = null,
                         HoTen = name,
                         Avatar = avatar,
-                        GoogleId = googleId, // Lưu vết để nhận diện cho lần đăng nhập sau 
-                        VaiTro = dto.VaiTro ?? 2, // Lấy vai trò (1 hoặc 2) truyền từ FE sang, mặc định là 2 (Ứng viên)
+                        GoogleId = googleId,
+                        VaiTro = dto.VaiTro ?? 2,
                         SoDuVi = 0,
                         TrangThai = true,
                         NgayTao = DateTime.Now,
-                        LuotXemCvConLai = dto.VaiTro == 1 ? 10 : 0 // Nếu là NTD thì tặng sẵn 10 lượt xem CV
+                        LuotXemCvConLai = dto.VaiTro == 1 ? 10 : 0
                     };
 
                     _context.Users.Add(user);
@@ -81,23 +76,24 @@ namespace TKVL.Controllers
                 }
                 else if (string.IsNullOrEmpty(user.GoogleId))
                 {
-                    // Trường hợp email này đã đăng ký bằng mật khẩu thường trước đó, giờ họ bấm đăng nhập Google
-                    // Thực hiện liên kết tài khoản (UPDATE thêm GoogleId để đồng bộ thực thể)
                     user.GoogleId = googleId;
                     if (string.IsNullOrEmpty(user.Avatar)) user.Avatar = avatar;
                     await _context.SaveChangesAsync();
                 }
 
-                // 3. Kiểm tra xem tài khoản có bị khóa không
                 if (!user.TrangThai) return BadRequest(new { success = false, message = "Tài khoản của bạn đã bị khóa!" });
 
-                // 4. KÝ SỐ VÀ CẤP JWT TOKEN CỦA HỆ THỐNG MÌNH BẮN VỀ CHO REACTJS
+                // KIỂM TRA ĐẶC QUYỀN VIP
+                bool isVip = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value > DateTime.UtcNow;
+
                 var claims = new[]
                 {
                     new Claim(ClaimTypes.NameIdentifier, user.MaUser.ToString()),
                     new Claim(ClaimTypes.Email, user.Email),
                     new Claim(ClaimTypes.Role, user.VaiTro.ToString()),
-                    new Claim("HoTen", user.HoTen)
+                    new Claim("HoTen", user.HoTen),
+                    // GHI TRẠNG THÁI VIP VÀO TOKEN
+                    new Claim("isVip", isVip.ToString().ToLower())
                 };
 
                 var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
@@ -117,7 +113,7 @@ namespace TKVL.Controllers
 
                 string newRefreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
                 user.RefreshToken = newRefreshToken;
-                user.NgayHetHanRefreshToken = DateTime.Now.AddDays(7); // Khóa phụ sống 7 ngày
+                user.NgayHetHanRefreshToken = DateTime.Now.AddDays(7);
                 await _context.SaveChangesAsync();
 
                 return Ok(new { success = true, token = systemToken, message = "Đăng nhập bằng tài khoản Google thành công!" });
@@ -133,9 +129,7 @@ namespace TKVL.Controllers
         {
             try
             {
-                // 1. Dùng HttpClient gọi lên Facebook Graph API để xác thực access_token
                 using var httpClient = new HttpClient();
-                // Xin Facebook trả về các trường: id, name, email, picture
                 var fbResponse = await httpClient.GetAsync($"https://graph.facebook.com/me?fields=id,name,email,picture&access_token={dto.AccessToken}");
 
                 if (!fbResponse.IsSuccessStatusCode)
@@ -152,14 +146,12 @@ namespace TKVL.Controllers
                 string email = payload.Email;
                 if (string.IsNullOrEmpty(email))
                 {
-                    // Cấp cho họ một cái email ảo dựa trên ID Facebook để không bị lỗi Database
                     email = $"{payload.Id}@facebook.com";
                 }
                 string name = payload.Name;
                 string facebookId = payload.Id;
                 string avatar = payload.Picture?.Data?.Url;
 
-                // 2. KIỂM TRA DATABASE
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.FacebookId == facebookId || u.Email == email);
 
                 if (user == null)
@@ -182,7 +174,6 @@ namespace TKVL.Controllers
                 }
                 else if (string.IsNullOrEmpty(user.FacebookId))
                 {
-                    // Liên kết tài khoản nếu tìm thấy Email nhưng chưa có FacebookId
                     user.FacebookId = facebookId;
                     if (string.IsNullOrEmpty(user.Avatar)) user.Avatar = avatar;
                     await _context.SaveChangesAsync();
@@ -190,13 +181,16 @@ namespace TKVL.Controllers
 
                 if (!user.TrangThai) return BadRequest(new { success = false, message = "Tài khoản của bạn đã bị khóa!" });
 
-                // 3. CẤP JWT TOKEN
+                // KIỂM TRA ĐẶC QUYỀN VIP
+                bool isVip = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value > DateTime.UtcNow;
+
                 var claims = new[]
                 {
                     new Claim(ClaimTypes.NameIdentifier, user.MaUser.ToString()),
                     new Claim(ClaimTypes.Email, user.Email),
                     new Claim(ClaimTypes.Role, user.VaiTro.ToString()),
-                    new Claim("HoTen", user.HoTen)
+                    new Claim("HoTen", user.HoTen),
+                    new Claim("isVip", isVip.ToString().ToLower())
                 };
 
                 var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
@@ -236,15 +230,12 @@ namespace TKVL.Controllers
                 return Ok(new { success = true, message = "Nếu Email tồn tại trên hệ thống, một liên kết khôi phục đã được gửi đi!" });
             }
 
-            // Sinh ra chuỗi Token bảo mật ngẫu nhiên
             string resetToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(64));
 
-            // Lưu vào database kèm thời gian hết hạn (sống trong 15 phút)
             user.ResetToken = resetToken;
             user.ResetTokenExpiry = DateTime.Now.AddMinutes(15);
             await _context.SaveChangesAsync();
 
-            // 👉 ĐÃ SỬA: Thay thế cổng 3000 bằng cổng 5173 chuẩn chỉnh của Vite Frontend
             string resetLink = $"http://localhost:5173/reset-password?token={resetToken}";
 
             try
@@ -264,7 +255,6 @@ namespace TKVL.Controllers
                 </div>
                 ";
 
-                // GỌI HÀM GỬI MAIL THẬT
                 await _emailService.SendEmailAsync(user.Email, "[JobsNow] Khôi phục mật khẩu của bạn", emailBody);
 
                 return Ok(new { success = true, message = "Liên kết đặt lại mật khẩu đã được gửi tới Email của bạn!" });
@@ -278,7 +268,6 @@ namespace TKVL.Controllers
         [HttpPost("reset-password")]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
         {
-            // Tìm user theo Token và kiểm tra xem Token đã hết hạn chưa
             var user = await _context.Users.FirstOrDefaultAsync(u => u.ResetToken == dto.Token && u.ResetTokenExpiry > DateTime.Now);
 
             if (user == null)
@@ -286,10 +275,8 @@ namespace TKVL.Controllers
                 return BadRequest(new { success = false, message = "Liên kết khôi phục mật khẩu không hợp lệ hoặc đã hết hạn!" });
             }
 
-            // 👉 ĐÃ FIX CHÍ MẠNG: Mã hóa mật khẩu mới bằng BCrypt băm thành chuỗi $2a$10$... trước khi lưu xuống DB
             user.MatKhau = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
 
-            // Đổi mật khẩu thành công thì XÓA TOKEN ĐI để tránh xài lại lần 2
             user.ResetToken = null;
             user.ResetTokenExpiry = null;
             await _context.SaveChangesAsync();
@@ -305,7 +292,6 @@ namespace TKVL.Controllers
                 return BadRequest(new { success = false, message = "Email này đã được đăng ký sử dụng!" });
             }
 
-            // Mã hóa mật khẩu bằng BCrypt trước khi lưu dữ liệu
             string hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.MatKhau);
 
             var newUser = new User
@@ -313,7 +299,7 @@ namespace TKVL.Controllers
                 Email = dto.Email,
                 MatKhau = hashedPassword,
                 HoTen = dto.HoTen,
-                VaiTro = dto.VaiTro, // 1: Nhà tuyển dụng, 2: Ứng viên
+                VaiTro = dto.VaiTro,
                 SoDuVi = 0,
                 TrangThai = true,
                 NgayTao = DateTime.Now,
@@ -329,14 +315,12 @@ namespace TKVL.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] DangNhapDto dto)
         {
-            // Tìm tài khoản theo email
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
             if (user == null)
             {
                 return Unauthorized(new { success = false, message = "Tài khoản email hoặc mật khẩu không chính xác!" });
             }
 
-            // Kiểm tra trạng thái tài khoản
             if (!user.TrangThai)
             {
                 return BadRequest(new { success = false, message = "Tài khoản của bạn hiện đã bị khóa bởi Admin!" });
@@ -351,20 +335,23 @@ namespace TKVL.Controllers
                 });
             }
 
-            // So khớp mật khẩu băm BCrypt
             bool isPasswordValid = BCrypt.Net.BCrypt.Verify(dto.MatKhau, user.MatKhau);
             if (!isPasswordValid)
             {
                 return Unauthorized(new { success = false, message = "Tài khoản email hoặc mật khẩu không chính xác!" });
             }
 
-            // Khởi tạo các thông tin định danh (Claims) nhét vào Token
+            // 👉 KIỂM TRA ĐẶC QUYỀN VIP
+            bool isVip = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value > DateTime.UtcNow;
+
             var claims = new[]
             {
                 new Claim(ClaimTypes.NameIdentifier, user.MaUser.ToString()),
                 new Claim(ClaimTypes.Email, user.Email),
                 new Claim(ClaimTypes.Role, user.VaiTro.ToString()),
-                new Claim("HoTen", user.HoTen)
+                new Claim("HoTen", user.HoTen),
+                // 👉 GHI TRẠNG THÁI VIP VÀO TOKEN
+                new Claim("isVip", isVip.ToString().ToLower())
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
@@ -385,7 +372,7 @@ namespace TKVL.Controllers
 
             string newRefreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
             user.RefreshToken = newRefreshToken;
-            user.NgayHetHanRefreshToken = DateTime.Now.AddDays(7); // Khóa phụ sống 7 ngày
+            user.NgayHetHanRefreshToken = DateTime.Now.AddDays(7);
             await _context.SaveChangesAsync();
 
             return Ok(new { success = true, token = jwtToken, message = "Đăng nhập hệ thống thành công!" });
@@ -396,18 +383,21 @@ namespace TKVL.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshToken == dto.RefreshToken);
 
-            // Kiểm tra xem RefreshToken có tồn tại và còn hạn không
             if (user == null || user.NgayHetHanRefreshToken < DateTime.Now)
             {
                 return Unauthorized(new { success = false, message = "Phiên làm việc đã hết hạn, vui lòng đăng nhập lại!" });
             }
 
-            // Tạo AccessToken mới 
+            // 👉 KIỂM TRA ĐẶC QUYỀN VIP KHI LÀM MỚI TOKEN (Có thể VIP vừa hết hạn)
+            bool isVip = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value > DateTime.UtcNow;
+
             var claims = new[] {
                 new Claim(ClaimTypes.NameIdentifier, user.MaUser.ToString()),
                 new Claim(ClaimTypes.Email, user.Email),
                 new Claim(ClaimTypes.Role, user.VaiTro.ToString()),
-                new Claim("HoTen", user.HoTen)
+                new Claim("HoTen", user.HoTen),
+                // 👉 GHI LẠI TRẠNG THÁI VIP MỚI NHẤT
+                new Claim("isVip", isVip.ToString().ToLower())
             };
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -422,7 +412,6 @@ namespace TKVL.Controllers
             var tokenHandler = new JwtSecurityTokenHandler();
             string newAccessToken = tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
 
-            // Tạo một RefreshToken mới để cuốn chiếu bảo mật
             string newRefreshToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
             user.RefreshToken = newRefreshToken;
             user.NgayHetHanRefreshToken = DateTime.Now.AddDays(7);
@@ -431,7 +420,7 @@ namespace TKVL.Controllers
             return Ok(new { success = true, accessToken = newAccessToken, refreshToken = newRefreshToken });
         }
 
-        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "1")] // Chỉ nhà tuyển dụng (Role = 1)
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "1")]
         [HttpGet("employer-status")]
         public async Task<IActionResult> GetEmployerStatus()
         {
@@ -443,22 +432,18 @@ namespace TKVL.Controllers
                     return Unauthorized(new { success = false, message = "Không xác định được danh tính." });
                 }
 
-                // Kiểm tra xem User này đã có bản ghi trong bảng CongTy chưa
                 var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == userId);
 
                 if (company == null)
                 {
-                    // Trường hợp 1: Chưa từng khai báo thông tin công ty
                     return Ok(new { success = true, status = "NO_COMPANY" });
                 }
 
-                if (company.TrangThai == false) // false: Chưa được Admin duyệt
+                if (company.TrangThai == false)
                 {
-                    // Trường hợp 2: Đã khai báo nhưng Admin chưa duyệt (hoặc từ chối)
                     return Ok(new { success = true, status = "PENDING" });
                 }
 
-                // Trường hợp 3: Đã được Admin phê duyệt (TrangThai == true)
                 return Ok(new { success = true, status = "APPROVED" });
             }
             catch (Exception ex)
@@ -479,14 +464,12 @@ namespace TKVL.Controllers
                     return Unauthorized(new { success = false, message = "Không xác định được danh tính." });
                 }
 
-                // Tránh trường hợp gửi trùng lặp
                 var existingCompany = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == userId);
                 if (existingCompany != null)
                 {
                     return BadRequest(new { success = false, message = "Hồ sơ công ty của bạn đã tồn tại trên hệ thống!" });
                 }
 
-                // Tạo mới bản ghi công ty với TrangThai = false (Chờ duyệt)
                 var newCompany = new CongTy
                 {
                     MaUser = userId,
@@ -495,7 +478,7 @@ namespace TKVL.Controllers
                     DiaChi = dto.DiaChi,
                     QuyMo = dto.QuyMo ?? "Dưới 50 nhân viên",
                     MoTa = dto.MoTa ?? "",
-                    TrangThai = false // Mặc định là chưa duyệt để Admin xử lý
+                    TrangThai = false
                 };
 
                 _context.CongTies.Add(newCompany);

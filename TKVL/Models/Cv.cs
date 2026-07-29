@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TKVL.Models;
 
@@ -32,10 +33,16 @@ public partial class Cv
     [MaxLength(50)]
     public string FontChu { get; set; }
 
+    public bool IsUploaded { get; set; } = false;
+
+    public int? MaNganh { get; set; }
+
     public string? CustomLayoutJson { get; set; }
 
-    // Liên kết 1-N với CV_CauTrucMuc
     public virtual ICollection<CV_CauTrucMuc> CauTrucMucs { get; set; }
+
+    [ForeignKey("MaNganh")]
+    public virtual NganhNghe? NganhNghe { get; set; }
 
     public virtual ICollection<DonUngTuyen> DonUngTuyens { get; set; } = new List<DonUngTuyen>();
 
