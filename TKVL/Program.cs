@@ -1,22 +1,27 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using CloudinaryDotNet;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using TKVL.Models;
 using TKVL.Services;
-using CloudinaryDotNet;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Cấu hình Controllers và Swagger
+// 1. Cấu hình Controllers và JSON
 builder.Services.AddControllers().AddJsonOptions(options =>
 {
     options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-}); ;
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Đăng ký HttpClient và Service xử lý phân tích AI
+// Đăng ký HttpClient chung
+builder.Services.AddHttpClient();
+
+// Đăng ký các Service AI & OCR
 builder.Services.AddHttpClient<IAiService, AiService>();
 builder.Services.AddHttpClient<IAiAnalysisService, AiAnalysisService>();
 
@@ -27,6 +32,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddDbContext<JobPortalDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// 3. Cấu hình Cloudinary
 var cloudinarySection = builder.Configuration.GetSection("Cloudinary");
 var account = new Account(
     cloudinarySection["CloudName"],
@@ -35,13 +41,13 @@ var account = new Account(
 );
 var cloudinary = new Cloudinary(account);
 builder.Services.AddSingleton(cloudinary);
-
-// 3. Cấu hình dịch vụ Thanh toán MoMo
-builder.Services.Configure<TKVL.DTOs.Payment.MomoConfig>(builder.Configuration.GetSection("MomoAPI"));
-builder.Services.AddScoped<TKVL.Services.IPaymentService, TKVL.Services.PaymentService>();
-
-// 4. Cấu hình dịch vụ Cloudinary
 builder.Services.AddScoped<ICloudinaryService, CloudinaryService>();
+
+// 4. Cấu hình dịch vụ Thanh toán MoMo
+builder.Services.Configure<TKVL.DTOs.Payment.MomoConfig>(builder.Configuration.GetSection("MomoAPI"));
+
+// Đăng ký IPaymentService dưới dạng Scoped để đồng bộ với DbContext
+builder.Services.AddScoped<IPaymentService, PaymentService>();
 
 // 5. Cấu hình CORS cho ReactJS
 builder.Services.AddCors(options => {
@@ -66,6 +72,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
         };
     });
+
 var app = builder.Build();
 
 // Cấu hình HTTP request pipeline.
@@ -76,10 +83,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowReactApp");
-
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
 
 app.Run();

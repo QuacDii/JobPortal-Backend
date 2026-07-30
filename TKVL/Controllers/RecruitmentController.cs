@@ -268,6 +268,7 @@ namespace TKVL.Controllers
                     data = new
                     {
                         maDon = application.MaDon,
+                        cvUrl = application.MaCvNavigation?.DuongDan,
                         trangThaiHienTai = application.TrangThai,
                         ghiChuTuyenDung = application.GhiChu,
                         thuGioiThieu = application.ThuGioiThieu,

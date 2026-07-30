@@ -24,7 +24,10 @@ public partial class CongTy
     public bool TrangThai { get; set; }
     public string? ChuKyEmail { get; set; }
     public string? MauEmailInterview { get; set; }
-
+    public string? GiayPhepKinhDoanhMatTruoc { get; set; }
+    public string? GiayPhepKinhDoanhMatSau { get; set; }
+    public string? YeuCauBoSung { get; set; }
+    public string? DuLieuChoDuyetJson { get; set; }
     public virtual User MaUserNavigation { get; set; } = null!;
 
     public virtual ICollection<TinTuyenDung> TinTuyenDungs { get; set; } = new List<TinTuyenDung>();
