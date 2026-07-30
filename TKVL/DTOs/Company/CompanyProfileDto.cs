@@ -38,6 +38,12 @@ namespace TKVL.DTOs.Company
         public string GiayPhepKinhDoanhMatTruoc { get; set; }
         public string GiayPhepKinhDoanhMatSau { get; set; }
         public DateTime NgayYeuCau { get; set; } = DateTime.Now;
+        public string QuyMo { get; set; }
+        public string DiaChi { get; set; }
+        public string MoTa { get; set; }
+        public IFormFile? LogoFile { get; set; }
+        public string? ChuKyEmail { get; set; }
+        public string? MauEmailInterview { get; set; }
     }
     public class PendingCompanyListDto
     {

@@ -196,7 +196,7 @@ namespace TKVL.Controllers
                 var cv = await _context.Cvs.FindAsync(maCv);
                 if (cv == null) return NotFound(new { success = false, message = "Không tìm thấy CV để xóa!" });
 
-                // CHỐT CHẶN 2: Chỉ chặn xóa khi đã nộp đơn để tránh lỗi khóa ngoại Foreign Key SQL
+                // Chỉ chặn xóa khi đã nộp đơn để tránh lỗi khóa ngoại Foreign Key SQL
                 var hasApplied = await _context.DonUngTuyens.AnyAsync(d => d.MaCv == maCv);
                 if (hasApplied)
                 {

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260726123406_AddMaNganhAndIsUploadedToCv")]
+    partial class AddMaNganhAndIsUploadedToCv
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -198,15 +201,6 @@ namespace TKVL.Migrations
                         .HasColumnType("nvarchar(255)")
                         .HasColumnName("diaChi");
 
-                    b.Property<string>("DuLieuChoDuyetJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("GiayPhepKinhDoanhMatSau")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("GiayPhepKinhDoanhMatTruoc")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Logo")
                         .HasMaxLength(255)
                         .IsUnicode(false)
@@ -245,9 +239,6 @@ namespace TKVL.Migrations
                     b.Property<bool>("TrangThai")
                         .HasColumnType("bit")
                         .HasColumnName("trangThai");
-
-                    b.Property<string>("YeuCauBoSung")
-                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("MaCongTy")
                         .HasName("PK__CongTy__EAECFE7B76A7CB70");

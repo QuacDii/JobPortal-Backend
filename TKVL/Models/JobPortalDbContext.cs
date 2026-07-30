@@ -168,6 +168,8 @@ public partial class JobPortalDbContext : DbContext
                 .HasMaxLength(255)
                 .IsUnicode(false)
                 .HasColumnName("duongDan");
+            entity.Property(e => e.IsUploaded)
+              .HasDefaultValue(false);
             entity.Property(e => e.IsPublic).HasColumnName("isPublic");
             entity.Property(e => e.MaUser).HasColumnName("maUser");
             entity.Property(e => e.TieuDe)
@@ -177,6 +179,10 @@ public partial class JobPortalDbContext : DbContext
             entity.HasOne(d => d.MaUserNavigation).WithMany(p => p.Cvs)
                 .HasForeignKey(d => d.MaUser)
                 .HasConstraintName("FK_CV_User");
+            entity.HasOne(d => d.NganhNghe)
+              .WithMany()
+              .HasForeignKey(d => d.MaNganh)
+              .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<DonUngTuyen>(entity =>

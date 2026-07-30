@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using TKVL.DTOs.Company;
 using TKVL.Models;
 using TKVL.Services;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace TKVL.Controllers
 {
@@ -56,7 +57,7 @@ namespace TKVL.Controllers
                 giayPhepKinhDoanhMatSau = company.GiayPhepKinhDoanhMatSau,
                 yeuCauBoSung = company.YeuCauBoSung,
                 mauEmailInterview = company.MauEmailInterview,
-                duLieuChoDuyetJson = company.DuLieuChoDuyetJson // Trả về trường bản nháp để Frontend nhận diện trạng thái chờ duyệt
+                duLieuChoDuyetJson = company.DuLieuChoDuyetJson, // Trả về trường bản nháp để Frontend nhận diện trạng thái chờ duyệt
             });
         }
 
@@ -292,6 +293,7 @@ namespace TKVL.Controllers
                 {
                     string chuDe = $"[{company.TenCongTy}] Thư mời tham gia phỏng vấn - Vị trí {tenViTri}";
 
+                    // 1. CỐ ĐỊNH: Khung layout Branding cao cấp (Master Wrapper Layout) luôn luôn sử dụng để bọc ngoài thư
                     string masterLayout = @"<div style='max-width: 620px; margin: 20px auto; font-family: ""Segoe UI"", Arial, sans-serif; color: #333333; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.06);'>
                         <div style='background-color: #1e3a8a; padding: 26px; text-align: center;'>
                             <h2 style='color: #ffffff; margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.5px;'>THƯ MỜI PHỎNG VẤN</h2>
@@ -304,6 +306,7 @@ namespace TKVL.Controllers
                         </div>
                     </div>";
 
+                    // 2. Đọc nội dung thư từ NTD soạn, nếu trống thì dùng văn bản mẫu mặc định của hệ thống
                     string thongDiepGoc = !string.IsNullOrEmpty(company.MauEmailInterview)
                         ? company.MauEmailInterview
                         : "Chào {TenUngVien},\n\nCông ty {TenCongTy} trân trọng mời bạn tham gia phỏng vấn vị trí {TenViTri}.\n• Thời gian: {ThoiGian}\n• Địa điểm: {DiaDiem}\n\n{LinkBaiTest}\n\nTrân trọng,\n{ChuKyEmail}";
@@ -316,10 +319,12 @@ namespace TKVL.Controllers
                         testLinkHtml = $"<a href='{request.LinkBaiTest}' target='_blank' style='background-color: #10b981; color: #ffffff; padding: 6px 14px; text-decoration: none; display: inline-block; font-size: 13px; font-weight: bold; border-radius: 4px; margin: 0 4px; box-shadow: 0 2px 4px rgba(16,185,129,0.15);'>🚀 BẮT ĐẦU LÀM BÀI TEST</a>";
                     }
 
+                    // 4. Chuẩn hóa khối chữ ký doanh nghiệp
                     string chuKyHtml = !string.IsNullOrEmpty(company.ChuKyEmail)
                         ? $"<div style='margin-top: 20px; padding-top: 12px; border-top: 1px dashed #cbd5e1; color: #475569; font-size: 13px;'>{company.ChuKyEmail.Replace("\n", "<br/>")}</div>"
                         : "";
 
+                    // 5. Tiến hành quét trộn dữ liệu động vào nội dung thư
                     string bodyText = thongDiepHtml
                         .Replace("{TenUngVien}", tenUngVien)
                         .Replace("{TenViTri}", tenViTri)
@@ -327,6 +332,8 @@ namespace TKVL.Controllers
                         .Replace("{DiaDiem}", request.DiaDiem ?? "Sẽ thông báo sau")
                         .Replace("{TenCongTy}", company.TenCongTy);
 
+                    // 6. Cơ chế phòng vệ vị trí đặt từ khóa của Nhà tuyển dụng
+                    // Nếu trong văn bản có ghi sẵn từ khóa {LinkBaiTest} -> Đổ nút bấm vào đúng chỗ đó
                     if (bodyText.Contains("{LinkBaiTest}"))
                     {
                         bodyText = bodyText.Replace("{LinkBaiTest}", testLinkHtml);
@@ -388,6 +395,8 @@ namespace TKVL.Controllers
             return Ok(new { status = "SUCCESS", data = myJobs });
         }
 
+        // API săn tìm ứng viên tích hợp bộ lọc nâng cao (Ngành nghề, Kỹ năng, Từ khóa)
+        // API săn tìm ứng viên công khai tích hợp bộ lọc ngành nghề cố định và kỹ năng nâng cao
         [HttpGet("hunt-cv")]
         public async Task<IActionResult> HuntCv(string keyword = "", string nganhNghe = "", string skills = "", string nganhNgheKhac = "")
         {
@@ -429,23 +438,26 @@ namespace TKVL.Controllers
                 .Any(d => d.MaCv == c.MaCv && d.MaViTriNavigation.MaTinNavigation.MaCongTy == company.MaCongTy));
 
             var cvList = await query.ToListAsync();
+
             var unlockedCvIds = await _context.LichSuMoKhoaCvs
-                .Where(l => l.MaUser == currentEmployerId)
-                .Select(l => l.MaCv)
-                .ToListAsync();
+                .Where(l => l.MaUser == currentEmployerId) 
+                .Select(l => l.MaCv) 
+                .ToListAsync();  
 
             var results = cvList.Select(c => new HuntCvDto
             {
-                MaCv = c.MaCv,
-                HoTen = c.MaUserNavigation.HoTen,
+                MaCv = c.MaCv,               
+                HoTen = c.MaUserNavigation.HoTen,                
                 IsUnlocked = unlockedCvIds.Contains(c.MaCv),
                 Email = unlockedCvIds.Contains(c.MaCv) ? c.MaUserNavigation.Email : "hoang***@gmail.com",
                 CvUrl = c.DuongDan
             }).ToList();
 
             return Ok(new { success = true, isPremium = true, luotXemCvConLai = user.LuotXemCvConLai, data = results });
+
         }
 
+        // API mo khoa thong tin lien he cua ung vien
         [HttpPost("unlock-cv/{maCv}")]
         public async Task<IActionResult> UnlockCv(int maCv)
         {
@@ -456,6 +468,7 @@ namespace TKVL.Controllers
                 var user = await _context.Users.FindAsync(currentEmployerId);
                 if (user == null) return Unauthorized(new { success = false, message = "Phiên đăng nhập hết hạn." });
 
+                // Kiem tra thoi han goi va so luong luot xem con lai cua doanh nghiep
                 bool isUserValid = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value >= DateTime.Now;
                 if (!isUserValid || user.LuotXemCvConLai <= 0)
                 {
@@ -463,6 +476,7 @@ namespace TKVL.Controllers
                 }
 
                 user.LuotXemCvConLai -= 1;
+
                 _context.LichSuMoKhoaCvs.Add(new LichSuMoKhoaCV
                 {
                     MaUser = currentEmployerId,
@@ -490,6 +504,8 @@ namespace TKVL.Controllers
                 .Select(n => n.TenNganh)
                 .ToListAsync();
 
+            // Cơ chế phòng vệ: Đảm bảo luôn có tùy chọn "Khác" ở cuối danh sách 
+            // để kích hoạt ô nhập liệu thông minh ở giao diện Frontend
             if (!industries.Contains("Khác"))
             {
                 industries.Add("Khác");
