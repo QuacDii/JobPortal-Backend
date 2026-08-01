@@ -89,10 +89,15 @@ namespace TKVL.Controllers
 
             if (company == null)
                 return BadRequest(new { success = false, message = "Bạn chưa khởi tạo Hồ sơ doanh nghiệp!" });
+
             if (company.TrangThai == false)
                 return BadRequest(new { success = false, message = "Hồ sơ của bạn đang chờ duyệt. Không thể đăng tin lúc này." });
+
             if (request.DanhSachViTri == null || request.DanhSachViTri.Count == 0)
                 return BadRequest(new { success = false, message = "Vui lòng thêm ít nhất 1 vị trí công việc!" });
+
+            // ⚡ A. KIỂM TRA THỜI HẠN VIP ĐỂ TỰ ĐỘNG BẬT ISPROMOTED (Đổi 'HanGoiVip' theo đúng tên cột trong DB của bạn)
+            bool isVipActive = company.TinTuyenDungs.Select(t => t.IsPromoted).Any() && company.TinTuyenDungs.Select(t => t.NgayHetHan).Any(d => d >= DateTime.Now);
 
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -102,9 +107,11 @@ namespace TKVL.Controllers
                     MaCongTy = company.MaCongTy,
                     TieuDeChienDich = request.TieuDeChienDich,
                     NgayHetHan = request.NgayHetHan,
-                    TrangThai = 0,
-                    IsPromoted = false
+                    NgayDang = DateTime.Now, // 🌟 Bổ sung ngày đăng mặc định là thời điểm tạo
+                    TrangThai = 0, // 0: Chờ duyệt
+                    IsPromoted = isVipActive // ⚡ Tự động đẩy tin lên VIP nếu gói dịch vụ còn hạn
                 };
+
                 _context.TinTuyenDungs.Add(newCampaign);
                 await _context.SaveChangesAsync();
 
@@ -114,6 +121,7 @@ namespace TKVL.Controllers
                     {
                         MaTin = newCampaign.MaTin,
                         TenViTri = posDto.TenViTri,
+                        CapBac = posDto.CapBac,
                         SoLuongTuyen = posDto.SoLuongTuyen,
                         Luong = posDto.Luong,
                         MoTaCongViec = posDto.MoTaCongViec,
@@ -123,6 +131,7 @@ namespace TKVL.Controllers
                         MaPhuong = posDto.MaPhuong,
                         NganhNgheKhac = posDto.NganhNgheKhac
                     };
+
                     _context.ChiTietViTris.Add(newPosition);
                     await _context.SaveChangesAsync();
 
@@ -136,6 +145,7 @@ namespace TKVL.Controllers
 
                             var existingSkill = await _context.KyNangs
                                 .FirstOrDefaultAsync(k => k.TenKyNang.ToLower() == keyword.ToLower());
+
                             if (existingSkill != null)
                             {
                                 kyNangEntities.Add(existingSkill);
@@ -155,8 +165,10 @@ namespace TKVL.Controllers
                         newPosition.MaKyNangs = kyNangEntities;
                     }
                 }
+
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
+
                 return Ok(new { success = true, message = "Đã gửi chiến dịch thành công! Vui lòng chờ Ban quản trị duyệt tin." });
             }
             catch (Exception ex)

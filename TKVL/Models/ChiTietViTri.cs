@@ -14,6 +14,7 @@ public partial class ChiTietViTri
     public int MaPhuong { get; set; }
 
     public string TenViTri { get; set; } = null!;
+    public string? CapBac { get; set; }
 
     public string Luong { get; set; } = null!;
 

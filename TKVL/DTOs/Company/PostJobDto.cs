@@ -14,6 +14,7 @@
     public class JobPositionDto
     {
         public string TenViTri { get; set; }
+        public string? CapBac { get; set; }
         public int SoLuongTuyen { get; set; }
         public string Luong { get; set; }
         public string MoTaCongViec { get; set; }

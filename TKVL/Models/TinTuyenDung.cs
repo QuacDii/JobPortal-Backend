@@ -16,6 +16,7 @@ public partial class TinTuyenDung
     public byte TrangThai { get; set; }
 
     public bool IsPromoted { get; set; }
+    public DateTime NgayDang { get; set; } = DateTime.Now;
 
     public virtual ICollection<ChiTietViTri> ChiTietViTris { get; set; } = new List<ChiTietViTri>();
 

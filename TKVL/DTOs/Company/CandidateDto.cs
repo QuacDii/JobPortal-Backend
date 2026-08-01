@@ -12,5 +12,6 @@
         public string GhiChu { get; set; }
         public int? DiemMatchingTong { get; set; }
         public string ProfileAiJson { get; set; }
+        public bool IsPendingAi { get; set; }
     }
 }

@@ -1,7 +1,11 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using TKVL.Models;
 using TKVL.Services;
 
@@ -13,18 +17,20 @@ namespace TKVL.Controllers
     {
         private readonly JobPortalDbContext _context;
         private readonly IEmailService _emailService;
+        private readonly IServiceProvider _serviceProvider; // 🌟 1. Bổ sung IServiceProvider
 
-        public ServiceController(JobPortalDbContext context, IEmailService emailService)
+        public ServiceController(JobPortalDbContext context, IEmailService emailService, IServiceProvider serviceProvider)
         {
             _context = context;
             _emailService = emailService;
+            _serviceProvider = serviceProvider;
         }
 
         // 1. LẤY DANH SÁCH GÓI DỊCH VỤ
         [HttpGet("packages")]
         public async Task<IActionResult> GetPackages()
         {
-            var packages = await _context.GoiDichVus.ToListAsync(); //
+            var packages = await _context.GoiDichVus.ToListAsync();
             return Ok(packages);
         }
 
@@ -37,9 +43,11 @@ namespace TKVL.Controllers
                            ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
 
             if (userIdClaim == null) return Unauthorized(new { message = "Vui lòng đăng nhập!" });
+
             int maUser = int.Parse(userIdClaim.Value);
 
             using var transaction = await _context.Database.BeginTransactionAsync();
+
             try
             {
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.MaUser == maUser);
@@ -48,7 +56,7 @@ namespace TKVL.Controllers
                 if (user == null || package == null)
                     return BadRequest(new { message = "Dữ liệu không hợp lệ." });
 
-                // KIỂM TRA GIÁ THỰC TẾ: Ưu tiên lấy giá khuyến mãi nếu có
+                // KIỂM TRA GIÁ THỰC TẾ
                 decimal giaThucTe = (package.GiaKhuyenMai.HasValue && package.GiaKhuyenMai > 0)
                                     ? package.GiaKhuyenMai.Value
                                     : package.GiaTien;
@@ -60,8 +68,9 @@ namespace TKVL.Controllers
                 user.SoDuVi -= giaThucTe;
 
                 // 2. LOGIC ROLLOVER: CỘNG DỒN LƯỢT XEM CV
-                if (user.LuotXemCvConLai.ToString()==null)
+                if (user.LuotXemCvConLai == null)
                     user.LuotXemCvConLai = 0;
+
                 user.LuotXemCvConLai += package.SoLuotXemCv;
 
                 // LOGIC LỊCH VẠN NIÊN THEO LOẠI GÓI
@@ -74,10 +83,10 @@ namespace TKVL.Controllers
                     case 1: // Gói Ngày/Tuần
                         user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0);
                         break;
-                    case 2: // Gói Tháng (Tự động canh tháng 28/30/31 ngày)
+                    case 2: // Gói Tháng
                         user.NgayHetHanGoi = ngayBatDau.AddMonths(package.DonViThoiGian ?? 0);
                         break;
-                    case 3: // Gói Năm (Tự động canh năm nhuận)
+                    case 3: // Gói Năm
                         user.NgayHetHanGoi = ngayBatDau.AddYears(package.DonViThoiGian ?? 0);
                         break;
                     default:
@@ -91,17 +100,26 @@ namespace TKVL.Controllers
                     MaUser = maUser,
                     MaGoi = package.MaGoi,
                     LoaiGiaoDich = 2,
-                    SoTien = giaThucTe, // Lưu giá thực tế đã trừ
+                    SoTien = giaThucTe,
                     PhuongThuc = "Ví nội bộ",
                     NgayGd = DateTime.Now,
                     TrangThai = true
                 };
+
                 _context.GiaoDiches.Add(giaoDich);
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                // GỬI EMAIL BIÊN LAI (Bọc Try-Catch để không làm hỏng app nếu mail lỗi)
+                // 🌟 2. KÍCH HOẠT PHÂN TÍCH AI BÙ BẮT ĐẦU TỪ ĐÂY (SAU KHU COMMIT TRANSACTION)
+                var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
+                if (company != null)
+                {
+                    // Chạy hàm background không làm treo Response HTTP
+                    _ = ProcessPendingAiAnalysesForEmployerAsync(company.MaCongTy, _serviceProvider);
+                }
+
+                // GỬI EMAIL BIÊN LAI
                 try
                 {
                     string emailBody = $@"
@@ -128,7 +146,6 @@ namespace TKVL.Controllers
                     <p style='color: #8c8c8c; font-size: 13px; text-align: center; margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 15px;'>Đây là email gửi tự động, vui lòng không trả lời thư này.</p>
                 </div>";
 
-                    // Bắn mail tới địa chỉ Email lưu trong bảng User
                     await _emailService.SendEmailAsync(user.Email, $"[JobsNow] Kích hoạt {package.TenGoi} thành công", emailBody);
                 }
                 catch (Exception ex)
@@ -138,7 +155,7 @@ namespace TKVL.Controllers
 
                 return Ok(new
                 {
-                    message = "Đăng ký gói thành công! Quyền lợi đã được cập nhật.",
+                    message = "Đăng ký gói thành công! Quyền lợi và cỗ máy AI đã được kích hoạt.",
                     soDuMoi = user.SoDuVi,
                     ngayHetHanMoi = user.NgayHetHanGoi,
                     luotXemMoi = user.LuotXemCvConLai
@@ -151,6 +168,49 @@ namespace TKVL.Controllers
             }
         }
 
+        // 🌟 3. HÀM XỬ LÝ BACKGROUND CHẠY BÙ PHÂN TÍCH AI CHO CÁC ĐƠN CŨ
+        private async Task ProcessPendingAiAnalysesForEmployerAsync(int maCongTy, IServiceProvider serviceProvider)
+        {
+            _ = Task.Run(async () =>
+            {
+                using var scope = serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<JobPortalDbContext>();
+                var aiService = scope.ServiceProvider.GetRequiredService<IAiAnalysisService>();
+
+                try
+                {
+                    // 🌟 CẬP NHẬT: Quét cả những đơn chưa phân tích HOẶC có record rỗng (ThongTinHoSoTrichXuatJson == "{}")
+                    var unanalyzedAppIds = await context.DonUngTuyens
+                        .Include(d => d.MaViTriNavigation)
+                            .ThenInclude(v => v.MaTinNavigation)
+                        .Where(d => d.MaViTriNavigation.MaTinNavigation.MaCongTy == maCongTy
+                                 && d.MaViTriNavigation.MaTinNavigation.TrangThai == 1
+                                 && (d.ChiTietPhanTichAi == null
+                                  || d.ChiTietPhanTichAi.DiemMatchingTong == 0
+                                  || d.ChiTietPhanTichAi.ThongTinHoSoTrichXuatJson == "{}"))
+                        .Select(d => d.MaDon)
+                        .ToListAsync();
+
+                    foreach (var maDon in unanalyzedAppIds)
+                    {
+                        try
+                        {
+                            await aiService.AnalyzeApplicationAsync(maDon);
+                            await Task.Delay(500); // Tránh rate limit
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[AI Retroactive Error] MaDon {maDon}: {ex.Message}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AI Retroactive General Error]: {ex.Message}");
+                }
+            });
+        }
+
         // 3. XEM LỊCH SỬ GIAO DỊCH CỦA DOANH NGHIỆP
         [HttpGet("history")]
         public async Task<IActionResult> GetTransactionHistory()
@@ -160,6 +220,7 @@ namespace TKVL.Controllers
                            ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
 
             if (userIdClaim == null) return Unauthorized();
+
             int maUser = int.Parse(userIdClaim.Value);
 
             var history = await _context.GiaoDiches
@@ -172,7 +233,7 @@ namespace TKVL.Controllers
                     g.PhuongThuc,
                     g.NgayGd,
                     g.TrangThai,
-                    TenGoi = g.MaGoiNavigation != null ? g.MaGoiNavigation.TenGoi : "Nạp tiền" // Lấy tên gói nếu có
+                    TenGoi = g.MaGoiNavigation != null ? g.MaGoiNavigation.TenGoi : "Nạp tiền"
                 })
                 .ToListAsync();
 
@@ -189,13 +250,13 @@ namespace TKVL.Controllers
             if (userIdClaim == null) return Unauthorized(new { message = "Vui lòng đăng nhập" });
 
             int maUser = int.Parse(userIdClaim.Value);
+
             var user = await _context.Users.FirstOrDefaultAsync(u => u.MaUser == maUser);
 
             if (user == null) return NotFound();
 
-            // TÌM GIAO DỊCH MUA GÓI GẦN NHẤT
             var latestTx = await _context.GiaoDiches
-                .Include(g => g.MaGoiNavigation) // Join sang bảng GoiDichVu
+                .Include(g => g.MaGoiNavigation)
                 .Where(g => g.MaUser == maUser && g.LoaiGiaoDich == 2 && g.TrangThai == true)
                 .OrderByDescending(g => g.NgayGd)
                 .FirstOrDefaultAsync();
@@ -203,7 +264,6 @@ namespace TKVL.Controllers
             string tenGoi = "Miễn phí";
             DateTime? ngayMua = null;
 
-            // Nếu người dùng vẫn đang còn hạn sử dụng gói
             if (user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now)
             {
                 tenGoi = latestTx != null && latestTx.MaGoiNavigation != null

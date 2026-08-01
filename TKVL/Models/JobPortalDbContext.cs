@@ -369,6 +369,8 @@ public partial class JobPortalDbContext : DbContext
                 .HasMaxLength(200)
                 .HasColumnName("tieuDeChienDich");
             entity.Property(e => e.TrangThai).HasColumnName("trangThai");
+            entity.Property(e => e.NgayDang)
+              .HasDefaultValueSql("GETDATE()");
 
             entity.HasOne(d => d.MaCongTyNavigation).WithMany(p => p.TinTuyenDungs)
                 .HasForeignKey(d => d.MaCongTy)

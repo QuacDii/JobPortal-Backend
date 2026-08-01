@@ -23,6 +23,7 @@ namespace TKVL.DTOs.Company
         public DateTime? NgayCapGiayPhep { get; set; }
         public string? NoiCapGiayPhep { get; set; }
 
+        public string? ChuKyEmail { get; set; }
         // File upload
         public IFormFile? LogoFile { get; set; }
         public IFormFile? GiayPhepKinhDoanhMatTruocFile { get; set; }
