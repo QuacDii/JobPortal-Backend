@@ -85,7 +85,11 @@ namespace TKVL.Controllers
         public async Task<IActionResult> PostJobCampaign([FromBody] PostJobRequestDto request)
         {
             int maUser = GetCurrentUserId();
-            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
+
+            // 🌟 1. Bổ sung Include MaUserNavigation để lấy thông tin tài khoản User liên kết
+            var company = await _context.CongTies
+                .Include(c => c.MaUserNavigation)
+                .FirstOrDefaultAsync(c => c.MaUser == maUser);
 
             if (company == null)
                 return BadRequest(new { success = false, message = "Bạn chưa khởi tạo Hồ sơ doanh nghiệp!" });
@@ -96,8 +100,10 @@ namespace TKVL.Controllers
             if (request.DanhSachViTri == null || request.DanhSachViTri.Count == 0)
                 return BadRequest(new { success = false, message = "Vui lòng thêm ít nhất 1 vị trí công việc!" });
 
-            // ⚡ A. KIỂM TRA THỜI HẠN VIP ĐỂ TỰ ĐỘNG BẬT ISPROMOTED (Đổi 'HanGoiVip' theo đúng tên cột trong DB của bạn)
-            bool isVipActive = company.TinTuyenDungs.Select(t => t.IsPromoted).Any() && company.TinTuyenDungs.Select(t => t.NgayHetHan).Any(d => d >= DateTime.Now);
+            // ⚡ 2. LOGIC ĐÚNG: Kiểm tra hạn gói dịch vụ trên tài khoản User (NgayHetHanGoi >= DateTime.Now)
+            bool isVipActive = company.MaUserNavigation != null
+                               && company.MaUserNavigation.NgayHetHanGoi.HasValue
+                               && company.MaUserNavigation.NgayHetHanGoi.Value >= DateTime.Now;
 
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -107,9 +113,9 @@ namespace TKVL.Controllers
                     MaCongTy = company.MaCongTy,
                     TieuDeChienDich = request.TieuDeChienDich,
                     NgayHetHan = request.NgayHetHan,
-                    NgayDang = DateTime.Now, // 🌟 Bổ sung ngày đăng mặc định là thời điểm tạo
+                    NgayDang = DateTime.Now,
                     TrangThai = 0, // 0: Chờ duyệt
-                    IsPromoted = isVipActive // ⚡ Tự động đẩy tin lên VIP nếu gói dịch vụ còn hạn
+                    IsPromoted = isVipActive // ⚡ Tự động gắn nhãn VIP nếu gói dịch vụ của User còn hạn
                 };
 
                 _context.TinTuyenDungs.Add(newCampaign);

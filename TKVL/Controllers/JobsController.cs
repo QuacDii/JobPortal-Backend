@@ -50,6 +50,7 @@ namespace TKVL.Controllers
                         viTris = t.ChiTietViTris.Select(c => new {
                             id = c.MaViTri,
                             title = c.TenViTri,
+                            capBac=c.CapBac,
                             salaryRange = c.Luong,
                             locationName = c.MaPhuongNavigation!.MaTpNavigation!.TenTp
                         }).ToList()
