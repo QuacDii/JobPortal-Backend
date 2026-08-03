@@ -277,6 +277,7 @@ namespace TKVL.Controllers
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
+
         // =================================================================
         // API 6: GET /api/PhuongXa?maTP=... (Lấy danh sách Phường/Xã theo Thành Phố)
         // =================================================================
@@ -300,6 +301,37 @@ namespace TKVL.Controllers
                 }
 
                 return Ok(new { success = true, data = phuongXas });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        // =================================================================
+        // API 7: POST /api/jobs/{maTin}/view (Cộng lượt xem tin tuyển dụng)
+        // =================================================================
+        [HttpPost("{maTin}/view")]
+        public async Task<IActionResult> RecordJobView(int maTin)
+        {
+            try
+            {
+                var job = await _context.TinTuyenDungs.FirstOrDefaultAsync(j => j.MaTin == maTin);
+                if (job == null) return NotFound(new { success = false, message = "Không tìm thấy tin tuyển dụng!" });
+
+                // 1. Tăng tổng lượt xem +1
+                job.LuotXem += 1;
+
+                // 2. Ghi nhật ký vào bảng LichSuXemTin
+                var viewLog = new LichSuXemTin
+                {
+                    MaTin = maTin,
+                    ThoiGianXem = DateTime.Now
+                };
+                _context.LichSuXemTins.Add(viewLog);
+
+                await _context.SaveChangesAsync();
+                return Ok(new { success = true, currentViews = job.LuotXem });
             }
             catch (Exception ex)
             {

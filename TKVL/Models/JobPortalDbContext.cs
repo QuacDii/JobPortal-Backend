@@ -57,6 +57,7 @@ public partial class JobPortalDbContext : DbContext
     public virtual DbSet<GoiDichVu_DacQuyen> GoiDichVu_DacQuyens { get; set; }
     public virtual DbSet<UserDacQuyen> UserDacQuyens { get; set; }
     public virtual DbSet<UngVienDaLuu> UngVienDaLuus { get; set; }
+    public virtual DbSet<LichSuXemTin> LichSuXemTins { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
     }
@@ -371,6 +372,9 @@ public partial class JobPortalDbContext : DbContext
                 .HasMaxLength(200)
                 .HasColumnName("tieuDeChienDich");
             entity.Property(e => e.TrangThai).HasColumnName("trangThai");
+            entity.Property(e => e.LuotXem)
+              .HasDefaultValue(0)
+              .HasColumnName("luotXem");
             entity.Property(e => e.NgayDang)
               .HasDefaultValueSql("GETDATE()");
 
@@ -580,6 +584,24 @@ public partial class JobPortalDbContext : DbContext
                 .HasForeignKey(d => d.MaCv)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_UngVienDaLuu_CV");
+        });
+        modelBuilder.Entity<LichSuXemTin>(entity =>
+        {
+            entity.HasKey(e => e.MaLichSu);
+            entity.ToTable("LichSuXemTin");
+
+            entity.Property(e => e.MaLichSu).HasColumnName("maLichSu");
+            entity.Property(e => e.MaTin).HasColumnName("maTin");
+            entity.Property(e => e.ThoiGianXem)
+                  .HasDefaultValueSql("GETDATE()")
+                  .HasColumnType("datetime")
+                  .HasColumnName("thoiGianXem");
+
+            entity.HasOne(d => d.MaTinNavigation)
+                  .WithMany(p => p.LichSuXemTins)
+                  .HasForeignKey(d => d.MaTin)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .HasConstraintName("FK_LichSuXemTin_TinTuyenDung");
         });
     }
 

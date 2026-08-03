@@ -503,6 +503,173 @@ namespace TKVL.Controllers
             return Ok(new { status = "SUCCESS", data = myJobs });
         }
 
+        [HttpPatch("jobs/{maTin}/toggle-status")]
+        public async Task<IActionResult> ToggleJobStatus(int maTin)
+        {
+            int currentUserId = GetCurrentUserId();
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+            if (company == null) return BadRequest(new { message = "Không tìm thấy thông tin doanh nghiệp!" });
+
+            var job = await _context.TinTuyenDungs
+                .FirstOrDefaultAsync(j => j.MaTin == maTin && j.MaCongTy == company.MaCongTy);
+
+            if (job == null) return NotFound(new { message = "Tin tuyển dụng không tồn tại hoặc không thuộc quyền sở hữu!" });
+
+            // Đổi trạng thái: Đang đăng (1) <-> Tạm dừng/Ẩn (2)
+            if (job.TrangThai == 1)
+            {
+                job.TrangThai = 2; // Tạm dừng
+            }
+            else if (job.TrangThai == 2)
+            {
+                // Kiểm tra xem đã hết hạn chưa trước khi mở lại
+                if (job.NgayHetHan < DateTime.Now)
+                {
+                    return BadRequest(new { success = false, message = "Tin tuyển dụng đã quá hạn! Vui lòng gia hạn ngày trước khi bật lại." });
+                }
+                job.TrangThai = 1; // Bật lại
+            }
+            else
+            {
+                return BadRequest(new { success = false, message = "Chỉ có thể ẩn/hiện tin đang đăng hoặc tạm dừng!" });
+            }
+
+            await _context.SaveChangesAsync();
+
+            string statusName = job.TrangThai == 1 ? "Đang đăng" : "Tạm dừng/Ẩn";
+            return Ok(new { success = true, newStatus = job.TrangThai, message = $"Đã chuyển trạng thái tin sang '{statusName}'!" });
+        }
+
+        [HttpGet("dashboard/analytics")]
+        public async Task<IActionResult> GetDashboardAnalytics(
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] int days = 30)
+        {
+            int currentUserId = GetCurrentUserId();
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+            if (company == null) return BadRequest(new { message = "Không tìm thấy doanh nghiệp!" });
+
+            int maCongTy = company.MaCongTy;
+
+            // 1. XÁC ĐỊNH KHOẢNG THỜI GIAN
+            DateTime end = endDate?.Date.AddDays(1).AddTicks(-1) ?? DateTime.Now;
+            DateTime start = startDate?.Date ?? DateTime.Now.Date.AddDays(-days + 1);
+            int totalDays = (end - start).Days + 1;
+
+            var allCompanyJobs = await _context.TinTuyenDungs
+                .Include(j => j.ChiTietViTris)
+                .Where(j => j.MaCongTy == maCongTy)
+                .ToListAsync();
+
+            var maTinList = allCompanyJobs.Select(j => j.MaTin).ToList();
+            var maViTriList = allCompanyJobs.SelectMany(j => j.ChiTietViTris).Select(v => v.MaViTri).ToList();
+
+            // 2. TÍNH CHỈ SỐ KPI TỔNG QUAN
+            int tinDangDangCount = allCompanyJobs.Count(j => j.TrangThai == 1 && j.NgayHetHan >= DateTime.Now);
+
+            var allApplications = await _context.DonUngTuyens
+                .Where(a => maViTriList.Contains(a.MaViTri))
+                .ToListAsync();
+
+            int hoSoMoiCount = allApplications.Count(a => a.TrangThai == 0);
+            int tongCvNopCount = allApplications.Count;
+            int tongLuotXemCount = allCompanyJobs.Sum(j => j.LuotXem);
+
+            double tyLeChuyenDoi = tongLuotXemCount > 0
+                ? Math.Round(((double)tongCvNopCount / tongLuotXemCount) * 100, 2)
+                : 0;
+
+            int luotXemCvConLai = 0; // Lấy từ bảng gói dịch vụ / đặc quyền người dùng nếu có
+
+            // 3. LỌC DỮ LIỆU THEO KHOẢNG THỜI GIAN CHỌN
+            var viewsLogs = await _context.LichSuXemTins
+                .Where(v => maTinList.Contains(v.MaTin) && v.ThoiGianXem >= start && v.ThoiGianXem <= end)
+                .ToListAsync();
+
+            var rangeApplications = allApplications.Where(a => a.NgayNop >= start && a.NgayNop <= end).ToList();
+
+            // 4. THUẬT TOÁN GOM NHÓM THÔNG MINH CHO BIỂU ĐỒ XU HƯỚNG
+            var dailyTrends = new List<DailyTrendItemDto>();
+
+            if (totalDays <= 60)
+            {
+                // Khoảng ngắn: Gom theo TỪNG NGÀY
+                for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
+                {
+                    dailyTrends.Add(new DailyTrendItemDto
+                    {
+                        Date = date.ToString("dd/MM"),
+                        Views = viewsLogs.Count(v => v.ThoiGianXem.Date == date),
+                        Applications = rangeApplications.Count(a => a.NgayNop.Date == date)
+                    });
+                }
+            }
+            else
+            {
+                // Khoảng dài (6 tháng, 1 năm): Gom theo TỪNG THÁNG
+                DateTime curr = new DateTime(start.Year, start.Month, 1);
+                while (curr <= end.Date)
+                {
+                    DateTime monthEnd = curr.AddMonths(1).AddDays(-1);
+                    if (monthEnd > end) monthEnd = end;
+
+                    dailyTrends.Add(new DailyTrendItemDto
+                    {
+                        Date = curr.ToString("MM/yyyy"),
+                        Views = viewsLogs.Count(v => v.ThoiGianXem.Date >= curr && v.ThoiGianXem.Date <= monthEnd),
+                        Applications = rangeApplications.Count(a => a.NgayNop.Date >= curr && a.NgayNop.Date <= monthEnd)
+                    });
+
+                    curr = curr.AddMonths(1);
+                }
+            }
+
+            // 5. TRẠNG THÁI HỒ SƠ
+            var statusDistribution = new List<StatusDistributionItemDto>
+            {
+                new() { StatusName = "Chờ duyệt", Count = rangeApplications.Count(a => a.TrangThai == 0) },
+                new() { StatusName = "Đã duyệt", Count = rangeApplications.Count(a => a.TrangThai == 1) },
+                new() { StatusName = "Hẹn phỏng vấn", Count = rangeApplications.Count(a => a.TrangThai == 2) },
+                new() { StatusName = "Trúng tuyển", Count = rangeApplications.Count(a => a.TrangThai == 3) },
+                new() { StatusName = "Từ chối", Count = rangeApplications.Count(a => a.TrangThai == 4) }
+            };
+
+            // 6. TOP TIN TUYỂN DỤNG
+            var topJobs = allCompanyJobs
+                .Select(j => new TopJobItemDto
+                {
+                    MaTin = j.MaTin,
+                    TieuDe = j.TieuDeChienDich,
+                    LuotXem = j.LuotXem,
+                    SoCvNop = rangeApplications.Count(a => j.ChiTietViTris.Select(v => v.MaViTri).Contains(a.MaViTri)),
+                    TrangThai = j.TrangThai,
+                    NgayDang = j.NgayDang
+                })
+                .OrderByDescending(j => j.SoCvNop)
+                .ThenByDescending(j => j.LuotXem)
+                .Take(5)
+                .ToList();
+
+            return Ok(new DashboardAnalyticsDto
+            {
+                Summary = new SummaryKpiDto
+                {
+                    TinDangDang = tinDangDangCount,
+                    HoSoMoiChuaDuyet = hoSoMoiCount,
+                    LuotXemCvConLai = luotXemCvConLai,
+                    TongLuotXemTin = tongLuotXemCount,
+                    TongCvNop = tongCvNopCount,
+                    TyLeChuyenDoi = tyLeChuyenDoi
+                },
+                Charts = new ChartsDataDto
+                {
+                    DailyTrends = dailyTrends,
+                    StatusDistribution = statusDistribution
+                },
+                TopJobs = topJobs
+            });
+        }
 
         // ===================================================================
         // API 1: LẤY SỐ LƯỢT XEM CV CÒN LẠI CỦA DOANH NGHIỆP (ĐỘC LẬP)
