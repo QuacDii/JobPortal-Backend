@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260802070643_AddPackagePrivilegesSystem")]
+    partial class AddPackagePrivilegesSystem
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -526,6 +529,10 @@ namespace TKVL.Migrations
                         .HasColumnType("tinyint")
                         .HasColumnName("loaiGoi");
 
+                    b.Property<int>("SoLuotXemCv")
+                        .HasColumnType("int")
+                        .HasColumnName("soLuotXemCV");
+
                     b.Property<string>("TenGoi")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -850,35 +857,6 @@ namespace TKVL.Migrations
                     b.HasIndex("MaCongTy");
 
                     b.ToTable("TinTuyenDung", (string)null);
-                });
-
-            modelBuilder.Entity("TKVL.Models.UngVienDaLuu", b =>
-                {
-                    b.Property<int>("MaUser")
-                        .HasColumnType("int")
-                        .HasColumnName("maUser");
-
-                    b.Property<int>("MaCv")
-                        .HasColumnType("int")
-                        .HasColumnName("maCV");
-
-                    b.Property<string>("GhiChuCaNhan")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)")
-                        .HasColumnName("ghiChuCaNhan");
-
-                    b.Property<DateTime>("NgayLuu")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime")
-                        .HasColumnName("ngayLuu")
-                        .HasDefaultValueSql("(getdate())");
-
-                    b.HasKey("MaUser", "MaCv")
-                        .HasName("PK_UngVienDaLuu");
-
-                    b.HasIndex("MaCv");
-
-                    b.ToTable("UngVienDaLuu", (string)null);
                 });
 
             modelBuilder.Entity("TKVL.Models.User", b =>
@@ -1273,27 +1251,6 @@ namespace TKVL.Migrations
                     b.Navigation("MaCongTyNavigation");
                 });
 
-            modelBuilder.Entity("TKVL.Models.UngVienDaLuu", b =>
-                {
-                    b.HasOne("TKVL.Models.Cv", "MaCvNavigation")
-                        .WithMany("UngVienDaLuus")
-                        .HasForeignKey("MaCv")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_UngVienDaLuu_CV");
-
-                    b.HasOne("TKVL.Models.User", "MaUserNavigation")
-                        .WithMany("UngVienDaLuus")
-                        .HasForeignKey("MaUser")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_UngVienDaLuu_User");
-
-                    b.Navigation("MaCvNavigation");
-
-                    b.Navigation("MaUserNavigation");
-                });
-
             modelBuilder.Entity("TKVL.Models.UserDacQuyen", b =>
                 {
                     b.HasOne("TKVL.Models.DacQuyen", "DacQuyen")
@@ -1347,8 +1304,6 @@ namespace TKVL.Migrations
                     b.Navigation("CauTrucMucs");
 
                     b.Navigation("DonUngTuyens");
-
-                    b.Navigation("UngVienDaLuus");
                 });
 
             modelBuilder.Entity("TKVL.Models.DacQuyen", b =>
@@ -1411,8 +1366,6 @@ namespace TKVL.Migrations
                     b.Navigation("GiaoDiches");
 
                     b.Navigation("TinDaLuus");
-
-                    b.Navigation("UngVienDaLuus");
                 });
 #pragma warning restore 612, 618
         }

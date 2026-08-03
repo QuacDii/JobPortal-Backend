@@ -53,7 +53,10 @@ public partial class JobPortalDbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
     public virtual DbSet<ChiTietPhanTichAi> ChiTietPhanTichAis { get; set; }
-
+    public virtual DbSet<DacQuyen> DacQuyens { get; set; }
+    public virtual DbSet<GoiDichVu_DacQuyen> GoiDichVu_DacQuyens { get; set; }
+    public virtual DbSet<UserDacQuyen> UserDacQuyens { get; set; }
+    public virtual DbSet<UngVienDaLuu> UngVienDaLuus { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
     }
@@ -261,7 +264,6 @@ public partial class JobPortalDbContext : DbContext
                 .HasColumnType("decimal(18, 2)")
                 .HasColumnName("giaTien");
             entity.Property(e => e.LoaiGoi).HasColumnName("loaiGoi");
-            entity.Property(e => e.SoLuotXemCv).HasColumnName("soLuotXemCV");
             entity.Property(e => e.DonViThoiGian).HasColumnName("donViThoiGian");
             entity.Property(e => e.TenGoi)
                 .HasMaxLength(100)
@@ -504,6 +506,80 @@ public partial class JobPortalDbContext : DbContext
                   .HasForeignKey<ChiTietPhanTichAi>(d => d.MaDon)
                   .OnDelete(DeleteBehavior.Cascade) // Khi nhà tuyển dụng xóa đơn ứng tuyển, bản phân tích AI tự động bay màu theo
                   .HasConstraintName("FK_ChiTietPhanTichAi_DonUngTuyen");
+        });
+
+        modelBuilder.Entity<GoiDichVu>(entity =>
+        {
+            entity.Property(e => e.DoiTuongSuDung).HasDefaultValue((byte)1);
+            entity.Property(e => e.TrangThai).HasDefaultValue(true);
+        });
+
+        modelBuilder.Entity<DacQuyen>(entity =>
+        {
+            entity.HasKey(e => e.MaDacQuyen);
+            entity.ToTable("DacQuyen");
+            entity.HasIndex(e => e.MaCode).IsUnique();
+            entity.Property(e => e.MaCode).HasMaxLength(50).IsUnicode(false);
+            entity.Property(e => e.TenDacQuyen).HasMaxLength(150);
+        });
+
+        modelBuilder.Entity<GoiDichVu_DacQuyen>(entity =>
+        {
+            entity.HasKey(e => new { e.MaGoi, e.MaDacQuyen });
+            entity.ToTable("GoiDichVu_DacQuyen");
+
+            entity.HasOne(d => d.GoiDichVu)
+                .WithMany(p => p.GoiDichVu_DacQuyens)
+                .HasForeignKey(d => d.MaGoi);
+
+            entity.HasOne(d => d.DacQuyen)
+                .WithMany(p => p.GoiDichVu_DacQuyens)
+                .HasForeignKey(d => d.MaDacQuyen);
+        });
+
+        modelBuilder.Entity<UserDacQuyen>(entity =>
+        {
+            entity.HasKey(e => new { e.MaUser, e.MaDacQuyen });
+            entity.ToTable("User_DacQuyen");
+
+            entity.HasOne(d => d.User)
+                .WithMany()
+                .HasForeignKey(d => d.MaUser);
+
+            entity.HasOne(d => d.DacQuyen)
+                .WithMany(p => p.UserDacQuyens)
+                .HasForeignKey(d => d.MaDacQuyen);
+        });
+
+        modelBuilder.Entity<UngVienDaLuu>(entity =>
+        {
+            // Khóa chính kép (MaUser, MaCv)
+            entity.HasKey(e => new { e.MaUser, e.MaCv }).HasName("PK_UngVienDaLuu");
+            entity.ToTable("UngVienDaLuu");
+
+            entity.Property(e => e.MaUser).HasColumnName("maUser");
+            entity.Property(e => e.MaCv).HasColumnName("maCV"); // Lưu ý maCV chuẩn theo quy ước DB của bạn
+            entity.Property(e => e.NgayLuu)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime")
+                .HasColumnName("ngayLuu");
+            entity.Property(e => e.GhiChuCaNhan)
+                .HasMaxLength(500)
+                .HasColumnName("ghiChuCaNhan");
+
+            // Quan hệ 1 - N với User (NTD)
+            entity.HasOne(d => d.MaUserNavigation)
+                .WithMany(p => p.UngVienDaLuus)
+                .HasForeignKey(d => d.MaUser)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_UngVienDaLuu_User");
+
+            // Quan hệ 1 - N với CV
+            entity.HasOne(d => d.MaCvNavigation)
+                .WithMany(p => p.UngVienDaLuus)
+                .HasForeignKey(d => d.MaCv)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_UngVienDaLuu_CV");
         });
     }
 

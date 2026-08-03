@@ -215,42 +215,75 @@ namespace TKVL.Controllers
             GoiDichVu? package = null;
             if (maGoi.HasValue)
             {
-                package = await _context.GoiDichVus.FirstOrDefaultAsync(g => g.MaGoi == maGoi.Value);
-                if (package != null)
+                // 🌟 BỔ SUNG .ThenInclude(gd => gd.DacQuyen) VÀO ĐÂY
+                package = await _context.GoiDichVus
+                    .Include(g => g.GoiDichVu_DacQuyens)
+                        .ThenInclude(gd => gd.DacQuyen)
+                    .FirstOrDefaultAsync(g => g.MaGoi == maGoi.Value);
+
+                if (package != null && user.SoDuVi >= (package.GiaKhuyenMai ?? package.GiaTien))
                 {
-                    decimal giaThucTe = (package.GiaKhuyenMai.HasValue && package.GiaKhuyenMai > 0)
-                                        ? package.GiaKhuyenMai.Value
-                                        : package.GiaTien;
+                    decimal giaThucTe = package.GiaKhuyenMai ?? package.GiaTien;
+                    user.SoDuVi -= giaThucTe;
 
-                    if (user.SoDuVi >= giaThucTe)
+                    // Tìm đặc quyền xem CV trong gói vừa mua
+                    var dacQuyenXemCv = package.GoiDichVu_DacQuyens
+                        .FirstOrDefault(dq => dq.DacQuyen != null && dq.DacQuyen.MaCode == "NTD_UNLOCK_CV");
+
+                    if (dacQuyenXemCv != null && dacQuyenXemCv.SoLuong.HasValue)
                     {
-                        user.SoDuVi -= giaThucTe;
-                        user.LuotXemCvConLai += package.SoLuotXemCv;
-
-                        DateTime ngayBatDau = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now
-                                              ? user.NgayHetHanGoi.Value
-                                              : DateTime.Now;
-
-                        switch (package.LoaiGoi)
-                        {
-                            case 1: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
-                            case 2: user.NgayHetHanGoi = ngayBatDau.AddMonths(package.DonViThoiGian ?? 0); break;
-                            case 3: user.NgayHetHanGoi = ngayBatDau.AddYears(package.DonViThoiGian ?? 0); break;
-                            default: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
-                        }
-
-                        _context.GiaoDiches.Add(new GiaoDich
-                        {
-                            MaUser = maUser,
-                            MaGoi = package.MaGoi,
-                            LoaiGiaoDich = 2, // 2: Mua gói
-                            SoTien = giaThucTe,
-                            PhuongThuc = "Ví nội bộ (Tự động)",
-                            NgayGd = DateTime.Now,
-                            TrangThai = true
-                        });
-                        await _context.SaveChangesAsync();
+                        // Cộng dồn vào cột đếm nhanh trên User
+                        user.LuotXemCvConLai = (user.LuotXemCvConLai) + dacQuyenXemCv.SoLuong.Value;
                     }
+
+                    DateTime ngayBatDau = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now
+                                          ? user.NgayHetHanGoi.Value
+                                          : DateTime.Now;
+
+                    switch (package.LoaiGoi)
+                    {
+                        case 1: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
+                        case 2: user.NgayHetHanGoi = ngayBatDau.AddMonths(package.DonViThoiGian ?? 0); break;
+                        case 3: user.NgayHetHanGoi = ngayBatDau.AddYears(package.DonViThoiGian ?? 0); break;
+                        default: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
+                    }
+
+                    // 🌟 CẤP ĐẶC QUYỀN
+                    foreach (var item in package.GoiDichVu_DacQuyens)
+                    {
+                        var userDacQuyen = await _context.UserDacQuyens
+                            .FirstOrDefaultAsync(ud => ud.MaUser == maUser && ud.MaDacQuyen == item.MaDacQuyen);
+
+                        if (userDacQuyen != null)
+                        {
+                            if (item.SoLuong.HasValue)
+                                userDacQuyen.SoLuotConLai = (userDacQuyen.SoLuotConLai ?? 0) + item.SoLuong.Value;
+                            userDacQuyen.NgayHetHan = user.NgayHetHanGoi.Value;
+                        }
+                        else
+                        {
+                            _context.UserDacQuyens.Add(new UserDacQuyen
+                            {
+                                MaUser = maUser,
+                                MaDacQuyen = item.MaDacQuyen,
+                                SoLuotConLai = item.SoLuong,
+                                NgayHetHan = user.NgayHetHanGoi.Value
+                            });
+                        }
+                    }
+
+                    _context.GiaoDiches.Add(new GiaoDich
+                    {
+                        MaUser = maUser,
+                        MaGoi = package.MaGoi,
+                        LoaiGiaoDich = 2,
+                        SoTien = giaThucTe,
+                        PhuongThuc = "Ví nội bộ (Tự động)",
+                        NgayGd = DateTime.Now,
+                        TrangThai = true
+                    });
+
+                    await _context.SaveChangesAsync();
                 }
             }
 

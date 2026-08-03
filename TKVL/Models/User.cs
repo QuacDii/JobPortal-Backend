@@ -45,4 +45,5 @@ public partial class User
     public virtual ICollection<GiaoDich> GiaoDiches { get; set; } = new List<GiaoDich>();
 
     public virtual ICollection<TinDaLuu> TinDaLuus { get; set; } = new List<TinDaLuu>();
+    public virtual ICollection<UngVienDaLuu> UngVienDaLuus { get; set; } = new List<UngVienDaLuu>();
 }

@@ -49,4 +49,5 @@ public partial class Cv
     public virtual User MaUserNavigation { get; set; } = null!;
 
     public virtual MauCV? MaMauNavigation { get; set; }
+    public virtual ICollection<UngVienDaLuu> UngVienDaLuus { get; set; } = new List<UngVienDaLuu>();
 }

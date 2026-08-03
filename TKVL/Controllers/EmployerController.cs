@@ -80,8 +80,8 @@ namespace TKVL.Controllers
             if (!Regex.IsMatch(targetMst, @"^\d+$"))
                 return BadRequest(new { success = false, message = "Mã số thuế chỉ được nhập chữ số!" });
 
-            if (!string.IsNullOrWhiteSpace(dto.QuyMo) && !Regex.IsMatch(dto.QuyMo.Trim(), @"^\d+$"))
-                return BadRequest(new { success = false, message = "Quy mô nhân sự chỉ được nhập chữ số!" });
+            if (!string.IsNullOrWhiteSpace(dto.QuyMo) && !Regex.IsMatch(dto.QuyMo.Trim(), @"^[\p{L}\p{N}\s]+$"))
+                return BadRequest(new { success = false, message = "Quy mô nhân sự chỉ được nhập chữ và số, không chứa ký tự đặc biệt!" });
 
             if (string.IsNullOrWhiteSpace(dto.MoTa))
                 return BadRequest(new { success = false, message = "Vui lòng nhập giới thiệu về công ty!" });
@@ -97,20 +97,70 @@ namespace TKVL.Controllers
                 });
             }
 
-            // 3. UPLOAD FILE MỚI VÀ VALIDATION
-            string newLogoUrl = dto.LogoFile != null ? await _cloudinaryService.UploadLogoAsync(dto.LogoFile) : null;
-            string newFrontUrl = dto.GiayPhepKinhDoanhMatTruocFile != null ? await _cloudinaryService.UploadGpkdAsync(dto.GiayPhepKinhDoanhMatTruocFile) : null;
-            string newBackUrl = dto.GiayPhepKinhDoanhMatSauFile != null ? await _cloudinaryService.UploadGpkdAsync(dto.GiayPhepKinhDoanhMatSauFile) : null;
+            // 🌟 3. UPLOAD FILE MỚI VÀ BẢO VỆ BẮT LỖI CLOUDINARY
+            string? newLogoUrl = null;
+            if (dto.LogoFile != null && dto.LogoFile.Length > 0)
+            {
+                try
+                {
+                    newLogoUrl = await _cloudinaryService.UploadLogoAsync(dto.LogoFile);
+                    if (string.IsNullOrEmpty(newLogoUrl))
+                    {
+                        return BadRequest(new { success = false, message = "Lỗi: Cloudinary trả về URL logo rỗng. Kiểm tra lại cấu hình Cloudinary!" });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest(new { success = false, message = $"Lỗi khi tải Logo lên Cloudinary: {ex.Message}" });
+                }
+            }
 
-            string finalLogo = newLogoUrl ?? company?.Logo;
+            string? newFrontUrl = null;
+            if (dto.GiayPhepKinhDoanhMatTruocFile != null && dto.GiayPhepKinhDoanhMatTruocFile.Length > 0)
+            {
+                try
+                {
+                    newFrontUrl = await _cloudinaryService.UploadGpkdAsync(dto.GiayPhepKinhDoanhMatTruocFile);
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest(new { success = false, message = $"Lỗi khi tải GPKD mặt trước lên Cloudinary: {ex.Message}" });
+                }
+            }
+
+            string? newBackUrl = null;
+            if (dto.GiayPhepKinhDoanhMatSauFile != null && dto.GiayPhepKinhDoanhMatSauFile.Length > 0)
+            {
+                try
+                {
+                    newBackUrl = await _cloudinaryService.UploadGpkdAsync(dto.GiayPhepKinhDoanhMatSauFile);
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest(new { success = false, message = $"Lỗi khi tải GPKD mặt sau lên Cloudinary: {ex.Message}" });
+                }
+            }
+
+            // 🌟 4. KIỂM TRA LOGO & GPKD CUỐI CÙNG
+            string? finalLogo = newLogoUrl ?? company?.Logo;
             if (string.IsNullOrEmpty(finalLogo))
-                return BadRequest(new { success = false, message = "Vui lòng tải lên Logo của doanh nghiệp!" });
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = dto.LogoFile == null
+                        ? "Backend không nhận được tệp LogoFile từ Client (dto.LogoFile = null)!"
+                        : "Vui lòng tải lên Logo của doanh nghiệp!"
+                });
+            }
 
-            string finalFront = newFrontUrl ?? company?.GiayPhepKinhDoanhMatTruoc;
+            string? finalFront = newFrontUrl ?? company?.GiayPhepKinhDoanhMatTruoc;
             if (string.IsNullOrEmpty(finalFront))
+            {
                 return BadRequest(new { success = false, message = "Vui lòng tải lên Giấy phép kinh doanh (Mặt trước / Bản chính)!" });
+            }
 
-            string targetBack = newBackUrl ?? company?.GiayPhepKinhDoanhMatSau;
+            string? targetBack = newBackUrl ?? company?.GiayPhepKinhDoanhMatSau;
 
             if (isNew)
             {
@@ -123,7 +173,7 @@ namespace TKVL.Controllers
             company.DiaChi = dto.DiaChi;
             company.MoTa = dto.MoTa;
             company.MauEmailInterview = dto.MauEmailInterview;
-            company.ChuKyEmail = dto.ChuKyEmail; // ✨ BỔ SUNG LƯU CHỮ KÝ EMAIL
+            company.ChuKyEmail = dto.ChuKyEmail;
 
             bool hasLegalChanges = isNew ||
                 company.TenCongTy != dto.TenCongTy ||
@@ -212,33 +262,57 @@ namespace TKVL.Controllers
         // API 2: LẤY DANH SÁCH ỨNG VIÊN (TRẢ VỀ MẢNG THUẦN CandidateDto[])
         // ===================================================================
         [HttpGet("jobs/{maViTri}/candidates")]
-        public async Task<IActionResult> GetCandidates(int maViTri)
+        [Authorize(Roles = "1")] // Chỉ dành cho Nhà tuyển dụng
+        public async Task<IActionResult> GetCandidatesByJob(int maViTri)
         {
+            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)
+                           ?? User.Claims.FirstOrDefault(c => c.Type == "nameid")
+                           ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
+
+            if (userIdClaim == null) return Unauthorized(new { message = "Vui lòng đăng nhập!" });
+            int maUser = int.Parse(userIdClaim.Value);
+
+            // 1. Kiểm tra vị trí tuyển dụng có thuộc về công ty của NTD này không
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
+            if (company == null)
+                return BadRequest(new { message = "Không tìm thấy thông tin công ty." });
+
+            var jobExists = await _context.TinTuyenDungs
+                .AnyAsync(b => b.ChiTietViTris.Select(c => c.MaViTri).Contains(maViTri) && b.MaCongTy == company.MaCongTy);
+
+            if (!jobExists)
+                return NotFound(new { message = "Không tìm thấy bài tuyển dụng hoặc bạn không có quyền truy cập." });
+
+            // 2. Query danh sách đơn ứng tuyển & Include ChiTietPhanTichAi
             var candidates = await _context.DonUngTuyens
-                .Include(d => d.ChiTietPhanTichAi)
                 .Include(d => d.MaCvNavigation)
-                    .ThenInclude(cv => cv.MaUserNavigation)
+                    .ThenInclude(u => u.MaUserNavigation)
+                .Include(d => d.ChiTietPhanTichAi) // Join bảng kết quả AI
                 .Where(d => d.MaViTri == maViTri)
-                .Select(d => new CandidateDto
+                .OrderByDescending(d => d.NgayNop)
+                .Select(d => new CandidateFunnelDto
                 {
                     MaDon = d.MaDon,
+                    MaUngVien = d.MaCvNavigation.MaUser,
                     HoTen = d.MaCvNavigation.MaUserNavigation.HoTen,
                     Email = d.MaCvNavigation.MaUserNavigation.Email,
-                    CvUrl = d.MaCvNavigation.DuongDan,
-                    ThuGioiThieu = d.ThuGioiThieu,
                     NgayNop = d.NgayNop,
                     TrangThai = d.TrangThai,
-                    GhiChu = d.GhiChu,
-                    DiemMatchingTong = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemMatchingTong : 0,
-                    ProfileAiJson = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.ThongTinHoSoTrichXuatJson : null,
+                    CvUrl = d.MaCvNavigation.DuLieuCv,
 
-                    // CẬP NHẬT ĐIỀU KIỆN: Kiểm tra thêm điểm 0 hoặc JSON rỗng "{}"
-                    IsPendingAi = d.ChiTietPhanTichAi == null
-                               || d.ChiTietPhanTichAi.DiemMatchingTong == 0
-                               || d.ChiTietPhanTichAi.ThongTinHoSoTrichXuatJson == "{}"
+                    // Kiểm tra xem đơn này đã được AI chấm điểm chưa
+                    IsPendingAi = d.ChiTietPhanTichAi == null,
+
+                    // 🌟 ÉP KIỂU (double) ĐỂ FIX LỖI Math.Round (CS0121)
+                    DiemMatchingTong = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemMatchingTong) : 0,
+                    DiemKyNang = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKyNang) : 0,
+                    DiemKinhNghiem = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKinhNghiem) : 0,
+                    DiemLinhVuc = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemLinhVuc) : 0,
+                    DiemCapBac = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemCapBac) : 0,
+
+                    DiemManhTieuBieu = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemManhTieuBieu : null,
+                    DiemConThieu = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemConThieu : null
                 })
-                .OrderByDescending(d => d.DiemMatchingTong)
-                .ThenByDescending(d => d.NgayNop)
                 .ToListAsync();
 
             return Ok(candidates);
@@ -305,7 +379,7 @@ namespace TKVL.Controllers
                     string testLinkHtml = "";
                     if (!string.IsNullOrEmpty(request.LinkBaiTest))
                     {
-                        testLinkHtml = $"<a href='{request.LinkBaiTest}' target='_blank' style='background-color: #10b981; color: #ffffff; padding: 6px 14px; text-decoration: none; display: inline-block; font-size: 13px; font-weight: bold; border-radius: 4px; margin: 0 4px; box-shadow: 0 2px 4px rgba(16,185,129,0.15);'>🚀 BẮT ĐẦU LÀM BÀI TEST</a>";
+                        testLinkHtml = $"<a href='{request.LinkBaiTest}' target='_blank' style='background-color: #10b981; color: #ffffff; padding: 6px 14px; text-decoration: none; display: inline-block; font-size: 13px; font-weight: bold; border-radius: 4px; margin: 0 4px; box-shadow: 0 2px 4px rgba(16,185,129,0.15);'>BẮT ĐẦU LÀM BÀI TEST</a>";
                     }
 
                     // 4. Chuẩn hóa khối chữ ký doanh nghiệp
@@ -470,7 +544,6 @@ namespace TKVL.Controllers
                 // 1. Lấy thông tin Công ty để loại trừ các CV đã từng nộp vào Công ty này
                 var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentEmployerId);
                 List<int> appliedCvIds = new List<int>();
-
                 if (company != null)
                 {
                     appliedCvIds = await _context.DonUngTuyens
@@ -483,11 +556,11 @@ namespace TKVL.Controllers
                 // 2. Query cơ bản: Chỉ lấy CV Bật IsPublic và Chưa từng ứng tuyển vào Công ty
                 var query = _context.Cvs
                     .Include(c => c.MaUserNavigation)
-                    .Include(c => c.NganhNghe) // ✨ Nạp thêm bảng Ngành nghề
+                    .Include(c => c.NganhNghe)
                     .Where(c => (c.IsPublic == true) && !appliedCvIds.Contains(c.MaCv))
                     .AsQueryable();
 
-                // 3. LỌC THEO TỪ KHÓA CHÍNH (Tên ứng viên / Tiêu đề / Nội dung CV)
+                // 3. LỌC THEO TỪ KHÓA CHÍNH
                 if (!string.IsNullOrWhiteSpace(keyword))
                 {
                     string kw = keyword.Trim().ToLower();
@@ -498,7 +571,7 @@ namespace TKVL.Controllers
                     );
                 }
 
-                // 4. LỌC THEO NGÀNH NGHỀ (Xử lý thông minh khi chọn "Khác")
+                // 4. LỌC THEO NGÀNH NGHỀ
                 string? targetIndustry = (nganhNghe == "Khác" && !string.IsNullOrWhiteSpace(nganhNgheKhac))
                     ? nganhNgheKhac
                     : nganhNghe;
@@ -512,7 +585,7 @@ namespace TKVL.Controllers
                     );
                 }
 
-                // 5. LỌC THEO KỸ NĂNG / CÔNG NGHỆ (Tìm trong Tiêu đề và Nội dung CV)
+                // 5. LỌC THEO KỸ NĂNG
                 if (!string.IsNullOrWhiteSpace(skills))
                 {
                     string sk = skills.Trim().ToLower();
@@ -522,20 +595,26 @@ namespace TKVL.Controllers
                     );
                 }
 
-                // 6. Sắp xếp kết quả mới nhất
                 var rawList = await query
                     .OrderByDescending(c => c.NgayCapNhat)
                     .ThenByDescending(c => c.MaCv)
                     .ToListAsync();
 
-                // 7. Lấy danh sách ID các CV mà Nhà tuyển dụng này ĐÃ MỞ KHÓA
+                // 6. Lấy danh sách ID các CV mà Nhà tuyển dụng này ĐÃ MỞ KHÓA
                 var unlockedCvIds = await _context.LichSuMoKhoaCvs
                     .Where(l => l.MaUser == currentEmployerId)
                     .Select(l => l.MaCv)
                     .ToListAsync();
 
+                // 🌟 7. LẤY DANH SÁCH CV ĐÃ LƯU VÀ GHI CHÚ CỦA NTD NÀY
+                var savedCandidatesMap = await _context.UngVienDaLuus
+                    .Where(u => u.MaUser == currentEmployerId)
+                    .ToDictionaryAsync(u => u.MaCv, u => u.GhiChuCaNhan);
+
                 var result = rawList.Select(c => {
                     bool isUnlocked = unlockedCvIds.Contains(c.MaCv);
+                    bool isSaved = savedCandidatesMap.ContainsKey(c.MaCv);
+                    string? ghiChu = isSaved ? savedCandidatesMap[c.MaCv] : null;
 
                     string? extractedJobTitle = null;
                     if (!string.IsNullOrWhiteSpace(c.DuLieuCv))
@@ -549,10 +628,7 @@ namespace TKVL.Controllers
                                 extractedJobTitle = jobTitleElement.GetString();
                             }
                         }
-                        catch
-                        {
-                            // Bỏ qua lỗi nếu JSON hỏng/không đúng định dạng
-                        }
+                        catch { }
                     }
 
                     return new
@@ -560,15 +636,16 @@ namespace TKVL.Controllers
                         maCv = c.MaCv,
                         maUser = c.MaUser,
                         hoTen = c.MaUserNavigation?.HoTen ?? "Ứng viên ẩn danh",
-                        // Ưu tiên lấy jobTitle từ JSON -> TieuDe -> Mặc định
                         jobTitle = !string.IsNullOrWhiteSpace(extractedJobTitle)
-                        ? extractedJobTitle
-                        : (!string.IsNullOrWhiteSpace(c.TieuDe) ? c.TieuDe : "Chưa cập nhật vị trí"),
+                            ? extractedJobTitle
+                            : (!string.IsNullOrWhiteSpace(c.TieuDe) ? c.TieuDe : "Chưa cập nhật vị trí"),
                         email = isUnlocked ? c.MaUserNavigation?.Email : "••••••••@gmail.com",
                         tieuDe = c.TieuDe ?? "Hồ sơ ứng viên",
                         tenNganh = c.NganhNghe?.TenNganh ?? "Chưa phân loại",
                         cvUrl = c.DuongDan,
                         isUnlocked = isUnlocked,
+                        isSaved = isSaved, // ✨ Flag đã lưu chưa
+                        ghiChuCaNhan = ghiChu, // ✨ Ghi chú cá nhân của NTD
                         ngayCapNhat = c.NgayCapNhat?.ToString("dd/MM/yyyy") ?? "Mới cập nhật"
                     };
                 }).ToList();
@@ -581,6 +658,79 @@ namespace TKVL.Controllers
                 return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi tìm kiếm CV!", error = detailError });
             }
         }
+
+        // 🌟 API ĐÁNH DẤU / BỎ ĐÁNH DẤU LƯU ỨNG VIÊN
+        [HttpPost("toggle-save-candidate")]
+        public async Task<IActionResult> ToggleSaveCandidate([FromBody] SaveCandidateDto dto)
+        {
+            try
+            {
+                int currentUserId = GetCurrentUserId();
+
+                // 🌟 1. RÀNG BUỘC NGHIỆP VỤ: Kiểm tra xem NTD đã mở khóa CV này chưa
+                bool isUnlocked = await _context.LichSuMoKhoaCvs
+                    .AnyAsync(l => l.MaUser == currentUserId && l.MaCv == dto.MaCv);
+
+                if (!isUnlocked)
+                {
+                    return BadRequest(new { success = false, message = "Bạn phải mở khóa liên hệ CV này trước khi lưu vào danh sách ưng ý!" });
+                }
+
+                // 2. Thực hiện Toggle lưu / bỏ lưu
+                var existing = await _context.UngVienDaLuus
+                    .FirstOrDefaultAsync(u => u.MaUser == currentUserId && u.MaCv == dto.MaCv);
+
+                if (existing != null)
+                {
+                    _context.UngVienDaLuus.Remove(existing);
+                    await _context.SaveChangesAsync();
+                    return Ok(new { success = true, isSaved = false, message = "Đã bỏ lưu ứng viên!" });
+                }
+                else
+                {
+                    var newItem = new UngVienDaLuu
+                    {
+                        MaUser = currentUserId,
+                        MaCv = dto.MaCv,
+                        GhiChuCaNhan = dto.GhiChuCaNhan,
+                        NgayLuu = DateTime.Now
+                    };
+                    _context.UngVienDaLuus.Add(newItem);
+                    await _context.SaveChangesAsync();
+                    return Ok(new { success = true, isSaved = true, message = "Đã lưu ứng viên vào danh sách ưng ý!" });
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi khi xử lý lưu ứng viên!", error = ex.Message });
+            }
+        }
+
+        // API CẬP NHẬT GHI CHÚ RIÊNG CHO ỨNG VIÊN ĐÃ LƯU
+        [HttpPut("update-candidate-note")]
+        public async Task<IActionResult> UpdateCandidateNote([FromBody] SaveCandidateDto dto)
+        {
+            try
+            {
+                int currentUserId = GetCurrentUserId();
+                var item = await _context.UngVienDaLuus
+                    .FirstOrDefaultAsync(u => u.MaUser == currentUserId && u.MaCv == dto.MaCv);
+
+                if (item == null)
+                {
+                    return NotFound(new { success = false, message = "Ứng viên này chưa được lưu trong danh sách!" });
+                }
+
+                item.GhiChuCaNhan = dto.GhiChuCaNhan;
+                await _context.SaveChangesAsync();
+                return Ok(new { success = true, message = "Cập nhật ghi chú thành công!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi khi lưu ghi chú!", error = ex.Message });
+            }
+        }
+
 
         // API mo khoa thong tin lien he cua ung vien
         [HttpPost("unlock-cv/{maCv}")]
