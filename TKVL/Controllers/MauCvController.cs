@@ -1,7 +1,11 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using TKVL.Models;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 using TKVL.Dtos;
+using TKVL.Models;
+using TKVL.Services;
 
 namespace TKVL.Controllers
 {
@@ -10,102 +14,243 @@ namespace TKVL.Controllers
     public class MauCvController : ControllerBase
     {
         private readonly JobPortalDbContext _context;
+        private readonly ICloudinaryService _cloudinaryService;
 
-        public MauCvController(JobPortalDbContext context)
+        public MauCvController(JobPortalDbContext context, ICloudinaryService cloudinaryService)
         {
             _context = context;
+            _cloudinaryService = cloudinaryService;
         }
 
-        // 1. API lấy danh sách mẫu CV (Ẩn dữ liệu mẫu để tối ưu hiệu năng)
-        [HttpGet]
-        public async Task<IActionResult> GetDanhSachMauCv([FromQuery] string? ngonNgu = null)
+        // GET: api/MauCv/categories
+        [HttpGet("categories")]
+        public async Task<IActionResult> GetCategories()
         {
-            var query = _context.MauCVs.Where(m => m.TrangThai == true);
+            var categories = await _context.DanhMucMaus
+                .Select(c => new { c.MaDanhMuc, c.TenDanhMuc })
+                .ToListAsync();
+
+            return Ok(categories);
+        }
+
+        // GET: api/MauCv
+        [HttpGet]
+        public async Task<IActionResult> GetDanhSachMauCv([FromQuery] string? ngonNgu = null, [FromQuery] bool? activeOnly = null)
+        {
+            var query = _context.MauCVs.AsQueryable();
+
+            if (activeOnly != false)
+            {
+                query = query.Where(m => m.TrangThai);
+            }
 
             if (!string.IsNullOrEmpty(ngonNgu))
             {
                 query = query.Where(m => m.NgonNgu == ngonNgu);
             }
 
-            // Bước A: Tải dữ liệu thô và chuỗi DanhSachMau gọn gàng từ SQL Server về RAM
-            var templatesRaw = await query
-                .Select(m => new
+            var templates = await query
+                .Select(m => new MauCvDto
                 {
                     Id = m.MaMau,
+                    MaMau = m.MaMau,
+                    TenMau = m.TenMau,
                     Title = m.TenMau,
-                    Description = m.MoTa,
+                    MoTa = m.MoTa,
+                    AnhThumbnail = m.AnhThumbnail,
                     Image = m.AnhThumbnail,
                     IsATS = m.IsATS,
+                    IsVip = m.IsVip,
+                    TrangThai = m.TrangThai,
                     NgonNgu = m.NgonNgu,
                     Tags = m.Tags,
-                    DanhSachMau = m.DanhSachMau, // 👈 Lấy chuỗi mã màu phẳng mới gộp
-                    Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList()
+                    DanhSachMau = m.DanhSachMau,
+                    Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList(),
+                    CategoryIds = m.PhanLoaiMaus.Select(p => p.MaDanhMuc).ToList(),
+                    DuLieuMau = m.DuLieuMau,
+                    LayoutJson = m.LayoutJson
                 })
+                .OrderByDescending(m => m.Id)
                 .ToListAsync();
-
-            // Bước B: Cắt chuỗi dấu phẩy thành List<string> trên RAM để trả về đúng DTO cho React đọc
-            var templates = templatesRaw.Select(m => new MauCvDto
-            {
-                Id = m.Id,
-                Title = m.Title,
-                Description = m.Description,
-                Image = m.Image,
-                IsATS = m.IsATS,
-                NgonNgu = m.NgonNgu,
-                Tags = m.Tags,
-                Colors = !string.IsNullOrEmpty(m.DanhSachMau) ? m.DanhSachMau.Split(',').ToList() : new List<string>(),
-                Categories = m.Categories,
-                DuLieuMau = null // Không load ở trang danh sách
-            }).ToList();
 
             return Ok(templates);
         }
 
-        // 2. API lấy chi tiết mẫu CV (Bơm dữ liệu mẫu JSON để bắt đầu dựng CV)
+        // GET: api/MauCv/5
         [HttpGet("{id}")]
         public async Task<IActionResult> GetMauCvById(int id)
         {
-            // Bước A: Tải dữ liệu thô của mẫu CV cụ thể theo Id
-            var templateRaw = await _context.MauCVs
-                .Where(m => m.MaMau == id && m.TrangThai == true)
-                .Select(m => new
+            var template = await _context.MauCVs
+                .Where(m => m.MaMau == id)
+                .Select(m => new MauCvDto
                 {
                     Id = m.MaMau,
+                    MaMau = m.MaMau,
+                    TenMau = m.TenMau,
                     Title = m.TenMau,
-                    Description = m.MoTa,
+                    MoTa = m.MoTa,
+                    AnhThumbnail = m.AnhThumbnail,
                     Image = m.AnhThumbnail,
                     IsATS = m.IsATS,
+                    IsVip = m.IsVip,
+                    TrangThai = m.TrangThai,
                     NgonNgu = m.NgonNgu,
                     Tags = m.Tags,
-                    DanhSachMau = m.DanhSachMau, // 👈 Lấy chuỗi mã màu phẳng mới gộp
+                    DanhSachMau = m.DanhSachMau,
                     Categories = m.PhanLoaiMaus.Select(p => p.DanhMucMauNavigation.TenDanhMuc).ToList(),
+                    CategoryIds = m.PhanLoaiMaus.Select(p => p.MaDanhMuc).ToList(),
                     DuLieuMau = m.DuLieuMau,
                     LayoutJson = m.LayoutJson
                 })
                 .FirstOrDefaultAsync();
 
-            if (templateRaw == null)
+            if (template == null)
             {
                 return NotFound(new { success = false, message = "Không tìm thấy mẫu CV này!" });
             }
 
-            // Bước B: Map sang DTO và bẻ chuỗi ngăn cách bằng dấu phẩy thành mảng Colors
-            var template = new MauCvDto
-            {
-                Id = templateRaw.Id,
-                Title = templateRaw.Title,
-                Description = templateRaw.Description,
-                Image = templateRaw.Image,
-                IsATS = templateRaw.IsATS,
-                NgonNgu = templateRaw.NgonNgu,
-                Tags = templateRaw.Tags,
-                Colors = !string.IsNullOrEmpty(templateRaw.DanhSachMau) ? templateRaw.DanhSachMau.Split(',').ToList() : new List<string>(),
-                Categories = templateRaw.Categories,
-                DuLieuMau = templateRaw.DuLieuMau,
-                LayoutJson = templateRaw.LayoutJson
-            };
-
             return Ok(template);
+        }
+
+        // POST: api/MauCv
+        [HttpPost]
+        public async Task<IActionResult> CreateMauCv([FromForm] MauCvCreateRequest request)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                string? thumbnailUrl = request.AnhThumbnail;
+
+                if (request.FileThumbnail != null)
+                {
+                    thumbnailUrl = await _cloudinaryService.UploadCvThumbnailAsync(request.FileThumbnail);
+                }
+
+                var entity = new MauCV
+                {
+                    TenMau = request.TenMau,
+                    MoTa = request.MoTa,
+                    AnhThumbnail = thumbnailUrl,
+                    IsATS = request.IsATS,
+                    IsVip = request.IsVip,
+                    TrangThai = request.TrangThai,
+                    NgonNgu = string.IsNullOrEmpty(request.NgonNgu) ? "VI" : request.NgonNgu,
+                    Tags = request.Tags,
+                    DuLieuMau = string.IsNullOrEmpty(request.DuLieuMau) ? "{}" : request.DuLieuMau,
+                    LayoutJson = request.LayoutJson,
+                    DanhSachMau = request.DanhSachMau
+                };
+
+                _context.MauCVs.Add(entity);
+                await _context.SaveChangesAsync();
+
+                if (request.CategoryIds != null && request.CategoryIds.Any())
+                {
+                    var phanLoais = request.CategoryIds.Select(cId => new PhanLoaiMau
+                    {
+                        MaMau = entity.MaMau,
+                        MaDanhMuc = cId
+                    });
+                    _context.PhanLoaiMaus.AddRange(phanLoais);
+                    await _context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+                return Ok(new { success = true, message = "Thêm mới mẫu CV thành công!", data = entity });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi thêm mẫu CV", error = ex.Message });
+            }
+        }
+
+        // PUT: api/MauCv/5
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateMauCv(int id, [FromForm] MauCvUpdateRequest request)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var entity = await _context.MauCVs.FindAsync(id);
+                if (entity == null)
+                {
+                    return NotFound(new { success = false, message = "Không tìm thấy mẫu CV!" });
+                }
+
+                if (request.FileThumbnail != null)
+                {
+                    entity.AnhThumbnail = await _cloudinaryService.UploadCvThumbnailAsync(request.FileThumbnail);
+                }
+                else if (!string.IsNullOrEmpty(request.AnhThumbnail))
+                {
+                    entity.AnhThumbnail = request.AnhThumbnail;
+                }
+
+                entity.TenMau = request.TenMau ?? entity.TenMau;
+                entity.MoTa = request.MoTa ?? entity.MoTa;
+                entity.IsATS = request.IsATS;
+                entity.IsVip = request.IsVip;
+                entity.TrangThai = request.TrangThai;
+                entity.NgonNgu = request.NgonNgu ?? entity.NgonNgu;
+                entity.Tags = request.Tags ?? entity.Tags;
+                entity.DuLieuMau = request.DuLieuMau ?? entity.DuLieuMau;
+                entity.LayoutJson = request.LayoutJson ?? entity.LayoutJson;
+                entity.DanhSachMau = request.DanhSachMau ?? entity.DanhSachMau;
+
+                if (request.CategoryIds != null)
+                {
+                    var oldCategories = _context.PhanLoaiMaus.Where(p => p.MaMau == id);
+                    _context.PhanLoaiMaus.RemoveRange(oldCategories);
+
+                    var newCategories = request.CategoryIds.Select(cId => new PhanLoaiMau
+                    {
+                        MaMau = id,
+                        MaDanhMuc = cId
+                    });
+                    _context.PhanLoaiMaus.AddRange(newCategories);
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new { success = true, message = "Cập nhật mẫu CV thành công!" });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi cập nhật", error = ex.Message });
+            }
+        }
+
+        // PUT: api/MauCv/5/toggle-status
+        [HttpPut("{id}/toggle-status")]
+        public async Task<IActionResult> ToggleStatus(int id, [FromBody] ToggleStatusRequest req)
+        {
+            var entity = await _context.MauCVs.FindAsync(id);
+            if (entity == null)
+            {
+                return NotFound(new { success = false, message = "Không tìm thấy mẫu CV!" });
+            }
+
+            entity.TrangThai = req.TrangThai;
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, message = "Đã cập nhật trạng thái hiển thị!" });
+        }
+
+        // DELETE: api/MauCv/5
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteMauCv(int id)
+        {
+            var entity = await _context.MauCVs.FindAsync(id);
+            if (entity == null)
+            {
+                return NotFound(new { success = false, message = "Không tìm thấy mẫu CV!" });
+            }
+
+            _context.MauCVs.Remove(entity);
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, message = "Đã xóa mẫu CV thành công!" });
         }
     }
 }

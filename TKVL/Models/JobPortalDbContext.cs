@@ -304,6 +304,12 @@ public partial class JobPortalDbContext : DbContext
                 .HasColumnName("trangThai");
         });
 
+        modelBuilder.Entity<NganhNghe>()
+        .HasOne(n => n.NganhCha)
+        .WithMany(n => n.NganhCon)
+        .HasForeignKey(n => n.MaNganhCha)
+        .OnDelete(DeleteBehavior.Restrict);
+
         modelBuilder.Entity<PhuongXa>(entity =>
         {
             entity.HasKey(e => e.MaPhuong).HasName("PK__PhuongXa__DF98DF6714DE7A6F");

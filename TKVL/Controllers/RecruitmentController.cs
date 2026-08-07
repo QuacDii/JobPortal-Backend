@@ -13,7 +13,7 @@ namespace TKVL.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize] // Bắt buộc đăng nhập token JWT cho toàn bộ Controller (trừ các hàm AllowAnonymous)
+    [Authorize]
     public class RecruitmentController : ControllerBase
     {
         private readonly JobPortalDbContext _context;
@@ -41,7 +41,7 @@ namespace TKVL.Controllers
         }
 
         // =================================================================
-        // 2. API LẤY DANH SÁCH NGÀNH NGHỀ
+        // 2. API LẤY DANH SÁCH NGÀNH NGHỀ (ĐÃ BỔ SUNG MaNganhCha)
         // =================================================================
         [HttpGet("industries")]
         [AllowAnonymous]
@@ -51,7 +51,8 @@ namespace TKVL.Controllers
                 .Where(n => n.TrangThai == true)
                 .Select(n => new {
                     value = n.MaNganh,
-                    label = n.TenNganh
+                    label = n.TenNganh,
+                    maNganhCha = n.MaNganhCha // 🌟 Thêm trường này để Frontend hỗ trợ ngành nghề phân cấp
                 })
                 .ToListAsync();
             return Ok(industries);
@@ -188,7 +189,7 @@ namespace TKVL.Controllers
         }
 
         // =================================================================================
-        // 5. API: Lấy phễu ứng viên kèm điểm AI (Màn hình Talent Pool & Danh sách xếp hạng)
+        // 5. API: Lấy phễu ứng viên (Màn hình Talent Pool & Danh sách xếp hạng)
         // =================================================================================
         [HttpGet("jobs/{maViTri}/applications")]
         public async Task<IActionResult> GetApplicationsByJob(int maViTri, [FromQuery] int? minMatch, [FromQuery] int? maxMatch, [FromQuery] int? trangThai)
@@ -214,7 +215,6 @@ namespace TKVL.Controllers
                     query = query.Where(d => d.TrangThai == trangThai.Value);
                 }
 
-                // Nạp danh sách thô về bộ nhớ để xử lý chuỗi JSON bất đồng bộ
                 var rawList = await query
                     .OrderByDescending(d => d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemMatchingTong : 0)
                     .ThenByDescending(d => d.NgayNop)
@@ -223,7 +223,6 @@ namespace TKVL.Controllers
                 var listApplications = rawList.Select(d => {
                     string aiJson = d.ChiTietPhanTichAi?.ThongTinHoSoTrichXuatJson;
 
-                    // Nếu chuỗi trích xuất của AI trống hoặc rỗng, thực hiện lấy dữ liệu từ CV gốc của ứng viên
                     if (string.IsNullOrEmpty(aiJson) || aiJson == "{}")
                     {
                         aiJson = MapCvBuilderToAiProfileJson(d.MaCvNavigation?.DuLieuCv);
@@ -346,13 +345,12 @@ namespace TKVL.Controllers
             }
         }
 
-        // Hàm phụ trợ: Trích xuất và cấu trúc lại chuỗi dữ liệu CV Builder thô sang định dạng đối tượng Frontend đang chờ
+        // Hàm phụ trợ: Trích xuất và cấu trúc lại chuỗi dữ liệu CV Builder
         private static string MapCvBuilderToAiProfileJson(string cvBuilderJson)
         {
             if (string.IsNullOrEmpty(cvBuilderJson)) return "{}";
             try
             {
-                // Làm sạch chuỗi văn bản khỏi ký tự ẩn BOM nếu có
                 string cleanJson = cvBuilderJson.Trim().Replace("\uFEFF", "");
 
                 if (cleanJson.StartsWith("\"") && cleanJson.EndsWith("\""))
@@ -371,7 +369,6 @@ namespace TKVL.Controllers
                 string hocVan = "Chưa cập nhật";
                 var kyNangs = new List<string>();
 
-                // 1. Trích xuất thông tin cá nhân cơ bản
                 if (root.TryGetProperty("personalInfo", out var personalInfo))
                 {
                     if (personalInfo.TryGetProperty("fullName", out var f)) hoTen = f.GetString() ?? hoTen;
@@ -381,7 +378,6 @@ namespace TKVL.Controllers
                     if (personalInfo.TryGetProperty("address", out var a)) noiCuTru = a.GetString() ?? noiCuTru;
                 }
 
-                // 2. Trích xuất thông tin học vấn từ mảng lịch sử học tập
                 if (root.TryGetProperty("education", out var education) && education.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
                     foreach (var item in education.EnumerateArray())
@@ -396,7 +392,6 @@ namespace TKVL.Controllers
                     }
                 }
 
-                // 3. Trích xuất chuỗi kỹ năng thô để cắt thành các phần tử mảng độc lập
                 if (root.TryGetProperty("skills", out var skillsProp))
                 {
                     string rawSkills = skillsProp.GetString() ?? "";
@@ -408,7 +403,6 @@ namespace TKVL.Controllers
 
                 if (!kyNangs.Any()) kyNangs.Add("Hồ sơ hệ thống");
 
-                // Đóng gói dữ liệu thành cấu trúc camelCase đồng bộ hoàn toàn với Frontend
                 var fallbackObj = new
                 {
                     hoTen = hoTen,
@@ -436,30 +430,6 @@ namespace TKVL.Controllers
                      ?? User.Claims.FirstOrDefault(c => c.Type == "nameid")
                      ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
             return int.Parse(claim.Value);
-        }
-        // =================================================================
-        // CỔNG API TEST: POST /api/recruitment/applications/{maDon}/re-analyze
-        // =================================================================
-        [HttpPost("applications/{maDon}/re-analyze")]
-        [AllowAnonymous]
-        public async Task<IActionResult> TriggerAiAnalysisManually(int maDon, [FromServices] Services.IAiAnalysisService aiAnalysisService)
-        {
-            try
-            {
-                // Gọi trực tiếp dịch vụ phân tích mà không cần thông qua luồng nộp đơn ngầm
-                bool result = await aiAnalysisService.AnalyzeApplicationAsync(maDon);
-
-                if (result)
-                {
-                    return Ok(new { success = true, message = "Đã kích hoạt cỗ máy AI chấm lại điểm thành công!" });
-                }
-
-                return BadRequest(new { success = false, message = "Quá trình phân tích thất bại, kiểm tra log console ở Backend." });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { success = false, error = ex.Message });
-            }
         }
     }
 }

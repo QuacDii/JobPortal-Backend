@@ -27,6 +27,8 @@ builder.Services.AddHttpClient<IAiAnalysisService, AiAnalysisService>();
 
 // Đăng ký Email Service
 builder.Services.AddScoped<IEmailService, EmailService>();
+// Đăng ký Background Service chạy ngầm
+builder.Services.AddHostedService<TKVL.Services.DailyJobAlertService>();
 
 // 2. Cấu hình Database
 builder.Services.AddDbContext<JobPortalDbContext>(options =>

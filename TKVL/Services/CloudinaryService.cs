@@ -57,5 +57,20 @@ namespace TKVL.Services
             var uploadResult = await _cloudinary.UploadAsync(imageParams);
             return uploadResult?.SecureUrl?.ToString();
         }
+
+        public async Task<string> UploadCvThumbnailAsync(IFormFile file)
+        {
+            if (file == null || file.Length == 0) return null;
+
+            using var stream = file.OpenReadStream();
+            var uploadParams = new ImageUploadParams
+            {
+                File = new FileDescription(file.FileName, stream),
+                Folder = "JobsNow/CVTemplates"
+            };
+
+            var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+            return uploadResult?.SecureUrl?.ToString();
+        }
     }
 }

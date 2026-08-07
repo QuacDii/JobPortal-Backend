@@ -7,5 +7,6 @@ namespace TKVL.Services
     {
         Task<string> UploadLogoAsync(IFormFile file);
         Task<string> UploadGpkdAsync(IFormFile file);
+        Task<string> UploadCvThumbnailAsync(IFormFile file);
     }
 }

@@ -44,7 +44,7 @@ namespace TKVL.Controllers
 
         // 1. Tạo liên kết thanh toán MoMo
         [HttpPost("create")]
-        public async Task<IActionResult> CreatePaymentUrl(int maUser, decimal soTien, int? maGoi = null)
+        public async Task<IActionResult> CreatePaymentUrl([FromQuery] int maUser, decimal soTien, int? maGoi = null)
         {
             try
             {

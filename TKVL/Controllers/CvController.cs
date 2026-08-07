@@ -1,10 +1,11 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using TKVL.Models;
+using UglyToad.PdfPig;
 
 namespace TKVL.Controllers
 {
@@ -52,11 +53,15 @@ namespace TKVL.Controllers
         }
 
         // 2. API: LƯU CV (TẠO MỚI HOẶC CẬP NHẬT)
+        // 2. API: LƯU CV (TẠO MỚI HOẶC CẬP NHẬT VÀ LƯU VÀO BẢNG CV_CAUTRUC)
         [HttpPost]
         public async Task<IActionResult> SaveCv([FromBody] SaveCvDto dto)
         {
+            using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                int savedCvId = 0;
+
                 // TRƯỜNG HỢP 1: TẠO MỚI
                 if (dto.MaCv == null || dto.MaCv == 0)
                 {
@@ -69,6 +74,7 @@ namespace TKVL.Controllers
                         DuLieuCv = dto.DuLieuCv,
                         IsPublic = dto.IsPublic,
                         IsPrimary = false,
+                        IsUploaded = dto.IsUploaded,
                         NgayCapNhat = DateTime.Now,
                         DuongDan = dto.DuongDan,
                         FontChu = dto.FontChu,
@@ -81,8 +87,7 @@ namespace TKVL.Controllers
 
                     _context.Cvs.Add(newCv);
                     await _context.SaveChangesAsync();
-
-                    return Ok(new { message = "Lưu hồ sơ mới thành công!", maCv = newCv.MaCv });
+                    savedCvId = newCv.MaCv;
                 }
                 else
                 {
@@ -102,11 +107,85 @@ namespace TKVL.Controllers
 
                     _context.Cvs.Update(existingCv);
                     await _context.SaveChangesAsync();
-                    return Ok(new { success = true, message = "Cập nhật hồ sơ thành công!", maCv = existingCv.MaCv });
+                    savedCvId = existingCv.MaCv;
                 }
+
+                // ==============================================================
+                // BƯỚC MỚI: BÓC TÁCH JSON VÀ LƯU VÀO BẢNG CV_CauTrucMucs
+                // ==============================================================
+                if (!string.IsNullOrEmpty(dto.CustomLayoutJson))
+                {
+                    // Xóa các cấu trúc cũ của CV này (nếu có) để chuẩn bị lưu mới
+                    var oldStructures = await _context.CV_CauTrucMucs.Where(c => c.MaCV == savedCvId).ToListAsync();
+                    if (oldStructures.Any())
+                    {
+                        _context.CV_CauTrucMucs.RemoveRange(oldStructures);
+                        await _context.SaveChangesAsync();
+                    }
+
+                    // Parse chuỗi CustomLayoutJson
+                    using var jsonDoc = JsonDocument.Parse(dto.CustomLayoutJson);
+                    var root = jsonDoc.RootElement;
+                    int orderCounter = 1;
+
+                    // Hàm cục bộ đệ quy duyệt qua các khối children trong JSON
+                    void ParseAndSaveNode(JsonElement node)
+                    {
+                        if (node.TryGetProperty("id", out var idProp))
+                        {
+                            string nodeId = idProp.GetString() ?? "";
+
+                            // Chỉ lọc ra các mục macro lớn (Bắt đầu bằng chữ 'section-')
+                            if (nodeId.StartsWith("section-") && nodeId != "section-avatar-profile" && nodeId != "section-business-card")
+                            {
+                                // Lấy tên hiển thị (nếu người dùng đổi tên)
+                                string displayName = "";
+                                if (node.TryGetProperty("children", out var children) && children.GetArrayLength() > 0)
+                                {
+                                    var firstChild = children[0];
+                                    if (firstChild.TryGetProperty("children", out var subChildren) && subChildren.GetArrayLength() > 0)
+                                    {
+                                        var textNode = subChildren[0];
+                                        if (textNode.TryGetProperty("content", out var contentProp))
+                                        {
+                                            displayName = contentProp.GetString() ?? "";
+                                        }
+                                    }
+                                }
+
+                                // Ghi vào Database
+                                var newStructure = new CV_CauTrucMuc
+                                {
+                                    MaCV = savedCvId,
+                                    LoaiMuc = nodeId.Replace("section-", "").ToUpper(),
+                                    TenMucHienThi = string.IsNullOrEmpty(displayName) ? nodeId : displayName,
+                                    ThuTu = orderCounter++,
+                                    IsVisible = true 
+                                };
+                                _context.CV_CauTrucMucs.Add(newStructure);
+                            }
+                        }
+
+                        // Đệ quy tiếp tục chui vào các nhánh con
+                        if (node.TryGetProperty("children", out var childNodes))
+                        {
+                            foreach (var child in childNodes.EnumerateArray())
+                            {
+                                ParseAndSaveNode(child);
+                            }
+                        }
+                    }
+
+                    ParseAndSaveNode(root);
+                    await _context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+                return Ok(new { success = true, message = "Lưu hồ sơ thành công!", maCv = savedCvId });
             }
             catch (Exception ex)
             {
+                await transaction.RollbackAsync();
                 return StatusCode(500, new { message = "Lỗi hệ thống khi ghi dữ liệu!", error = ex.Message });
             }
         }
@@ -280,6 +359,41 @@ namespace TKVL.Controllers
             }
         }
 
+        [HttpPost("import")]
+        [Consumes("multipart/form-data")] // 🌟 Khai báo để Swagger hiểu đây là Upload File
+        public IActionResult ImportCv(IFormFile file) // 🌟 BỎ [FromForm] khỏi IFormFile
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest(new { message = "Vui lòng chọn file CV hợp lệ!" });
+
+            if (Path.GetExtension(file.FileName).ToLower() != ".pdf")
+                return BadRequest(new { message = "Hệ thống hiện chỉ hỗ trợ định dạng PDF." });
+
+            try
+            {
+                using var stream = file.OpenReadStream();
+                using var document = PdfDocument.Open(stream);
+
+                if (document.Information.DocumentInformationDictionary.TryGet(UglyToad.PdfPig.Tokens.NameToken.Create("JobsNowCvData"), out var token))
+                {
+                    string base64Data = token is UglyToad.PdfPig.Tokens.StringToken stringToken ? stringToken.Data : token.ToString();
+                    base64Data = base64Data.Trim('(', ')');
+
+                    var bytes = Convert.FromBase64String(base64Data);
+                    string jsonCvData = System.Text.Encoding.UTF8.GetString(bytes);
+
+                    var cvObject = JsonSerializer.Deserialize<object>(jsonCvData);
+                    return Ok(new { success = true, cvContent = cvObject });
+                }
+
+                return BadRequest(new { message = "Định dạng không hợp lệ. Hệ thống chỉ hỗ trợ trích xuất dữ liệu từ các file PDF được tải xuống từ JobsNow." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi khi phân tích dữ liệu file PDF: " + ex.Message });
+            }
+        }
+
         public class RenameCvDto
         {
             public string TieuDe { get; set; } = string.Empty;
@@ -293,6 +407,7 @@ namespace TKVL.Controllers
             public int MaMau { get; set; }
             public string MaHex { get; set; } = string.Empty;
             public string TieuDe { get; set; } = string.Empty;
+            public bool IsUploaded { get; set; }
             public string DuLieuCv { get; set; } = string.Empty;
             public bool IsPublic { get; set; }
             public string? DuongDan { get; set; }

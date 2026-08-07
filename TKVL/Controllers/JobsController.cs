@@ -69,7 +69,14 @@ namespace TKVL.Controllers
         // =================================================================
         // API 2: GET /api/jobs/search (BỘ LỌC NÂNG CAO ĐA CHIỀU)
         [HttpGet("search")]
-        public async Task<IActionResult> SearchJobs([FromQuery] string? keyword, [FromQuery] int? maTP, [FromQuery] int? maPhuong, [FromQuery] int? maNganh)
+        public async Task<IActionResult> SearchJobs(
+     [FromQuery] string? keyword,
+     [FromQuery] int? maTP,
+     [FromQuery] int? maPhuong,
+     [FromQuery] int? maNganh,
+     [FromQuery] string? capBac,  
+     [FromQuery] string? mucLuong  
+ )
         {
             try
             {
@@ -81,7 +88,7 @@ namespace TKVL.Controllers
                     .Where(t => t.TrangThai == 1)
                     .AsQueryable();
 
-                // Lọc theo Keyword
+                // 1. Lọc theo Keyword
                 if (!string.IsNullOrEmpty(keyword))
                 {
                     query = query.Where(t => t.TieuDeChienDich.Contains(keyword) ||
@@ -89,22 +96,38 @@ namespace TKVL.Controllers
                                              t.ChiTietViTris.Any(c => c.TenViTri.Contains(keyword)));
                 }
 
-                // 👉 BỔ SUNG LOGIC LỌC PHƯỜNG/XÃ VÀ THÀNH PHỐ
+                // 2. Lọc Địa điểm
                 if (maPhuong.HasValue)
                 {
-                    // Nếu người dùng chọn Phường/Xã cụ thể -> Lọc thẳng theo mã phường
                     query = query.Where(t => t.ChiTietViTris.Any(c => c.MaPhuong == maPhuong.Value));
                 }
                 else if (maTP.HasValue)
                 {
-                    // Nếu người dùng CHỈ chọn Thành Phố (không chọn Phường) -> Lọc theo Thành Phố
                     query = query.Where(t => t.ChiTietViTris.Any(c => c.MaPhuongNavigation.MaTp == maTP.Value));
                 }
 
-                // Lọc theo Ngành nghề
+                // 3. 🌟 LỌC THÔNG MINH THEO NGÀNH NGHỀ PHÂN CẤP (Tìm cả ngành con)
                 if (maNganh.HasValue)
                 {
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.MaNganh == maNganh.Value));
+                    // Lấy danh sách gồm: Mã ngành được chọn + Tất cả mã ngành con của nó
+                    var allRelatedNganhIds = await _context.NganhNghes
+                        .Where(n => n.MaNganh == maNganh.Value || n.MaNganhCha == maNganh.Value || (n.NganhCha != null && n.NganhCha.MaNganhCha == maNganh.Value))
+                        .Select(n => n.MaNganh)
+                        .ToListAsync();
+
+                    query = query.Where(t => t.ChiTietViTris.Any(c => allRelatedNganhIds.Contains(c.MaNganh)));
+                }
+
+                // 4. 🌟 Lọc theo Cấp bậc
+                if (!string.IsNullOrEmpty(capBac) && capBac != "Tất cả")
+                {
+                    query = query.Where(t => t.ChiTietViTris.Any(c => c.CapBac != null && c.CapBac.Contains(capBac)));
+                }
+
+                // 5. 🌟 Lọc theo Mức lương
+                if (!string.IsNullOrEmpty(mucLuong) && mucLuong != "Tất cả")
+                {
+                    query = query.Where(t => t.ChiTietViTris.Any(c => c.Luong != null && c.Luong.Contains(mucLuong)));
                 }
 
                 // Thực thi thuật toán đẩy Top và lấy dữ liệu
@@ -122,6 +145,7 @@ namespace TKVL.Controllers
                         viTris = t.ChiTietViTris.Select(c => new {
                             id = c.MaViTri,
                             title = c.TenViTri,
+                            capBac = c.CapBac,
                             salaryRange = c.Luong,
                             locationName = c.MaPhuongNavigation!.MaTpNavigation!.TenTp
                         }).ToList()
@@ -144,8 +168,8 @@ namespace TKVL.Controllers
             var jobDetail = await _context.TinTuyenDungs
                 .Include(t => t.MaCongTyNavigation)
                 .Include(t => t.ChiTietViTris)
-                    .ThenInclude(c => c.MaPhuongNavigation) // 👉 BỔ SUNG: Join bảng Phường
-                        .ThenInclude(p => p.MaTpNavigation) // 👉 BỔ SUNG: Join bảng Thành Phố
+                    .ThenInclude(c => c.MaPhuongNavigation) 
+                        .ThenInclude(p => p.MaTpNavigation) 
                 .Where(t => t.MaTin == id)
                 .Select(t => new
                 {
@@ -219,7 +243,7 @@ namespace TKVL.Controllers
         // =================================================================
         public class ApplyRequest
         {
-            public int MaViTri { get; set; } // 👉 Bắt buộc phải có để hứng dữ liệu từ Dropdown ReactJS
+            public int MaViTri { get; set; } 
             public int MaCv { get; set; }
             public string ThuGioiThieu { get; set; } = string.Empty;
         }
@@ -232,7 +256,7 @@ namespace TKVL.Controllers
         {
             try
             {
-                // 1. Xác định User ID một cách an toàn tuyệt đối từ CV thay vì dùng Header
+                // 1. Xác định User ID một cách an toàn tuyệt đối từ CV 
                 var cv = await _context.Cvs.FindAsync(request.MaCv);
                 if (cv == null)
                 {
@@ -263,13 +287,6 @@ namespace TKVL.Controllers
                 _context.DonUngTuyens.Add(don);
                 await _context.SaveChangesAsync();
 
-                _ = Task.Run(async () =>
-                {
-                    using var scope = _serviceProvider.CreateScope();
-                    var aiService = scope.ServiceProvider.GetRequiredService<IAiAnalysisService>();
-                    await aiService.AnalyzeApplicationAsync(don.MaDon);
-                });
-
                 return Ok(new { success = true, message = "Ứng tuyển thành công!" });
             }
             catch (Exception ex)
@@ -281,7 +298,7 @@ namespace TKVL.Controllers
         // =================================================================
         // API 6: GET /api/PhuongXa?maTP=... (Lấy danh sách Phường/Xã theo Thành Phố)
         // =================================================================
-        [HttpGet("/api/PhuongXa")] // Đặt fixed route có dấu "/" ở đầu để ghi đè route của Controller
+        [HttpGet("/api/PhuongXa")]
         public async Task<IActionResult> GetPhuongXaByThanhPho([FromQuery] int maTP)
         {
             try
@@ -332,6 +349,86 @@ namespace TKVL.Controllers
 
                 await _context.SaveChangesAsync();
                 return Ok(new { success = true, currentViews = job.LuotXem });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        // =================================================================
+        // API 8: GET /api/jobs/bookmarked (Lấy danh sách mã vị trí đã lưu của User)
+        // =================================================================
+        [HttpGet("bookmarked")]
+        public async Task<IActionResult> GetBookmarkedJobs([FromHeader] int maUser)
+        {
+            try
+            {
+                var bookmarkedIds = await _context.TinDaLuus
+                    .Where(x => x.MaUser == maUser)
+                    .Select(x => x.MaViTri)
+                    .ToListAsync();
+
+                return Ok(new { success = true, data = bookmarkedIds });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        // =================================================================
+        // API 9: GET /api/jobs/suggestions (Gợi ý từ khóa dựa trên Lịch sử nộp đơn & Thả tim)
+        // =================================================================
+        [HttpGet("suggestions")]
+        public async Task<IActionResult> GetJobSuggestions([FromHeader] int? maUser)
+        {
+            try
+            {
+                var suggestions = new List<string>();
+
+                if (maUser.HasValue && maUser.Value > 0)
+                {
+                    // 1. Ưu tiên lấy tên các vị trí từ Đơn ứng tuyển đã nộp gần đây của User
+                    var appliedTitles = await _context.DonUngTuyens
+                        .Include(d => d.MaViTriNavigation)
+                        .Where(d => d.MaCvNavigation.MaUser == maUser.Value)
+                        .OrderByDescending(d => d.NgayNop)
+                        .Select(d => d.MaViTriNavigation.TenViTri)
+                        .Take(3)
+                        .ToListAsync();
+
+                    suggestions.AddRange(appliedTitles);
+
+                    // 2. Nếu chưa đủ 4 gợi ý, lấy tiếp từ các Vị trí mà User đã Thả tim (Lưu tin)
+                    if (suggestions.Count < 4)
+                    {
+                        var bookmarkedTitles = await _context.TinDaLuus
+                            .Include(t => t.MaViTriNavigation)
+                            .Where(t => t.MaUser == maUser.Value)
+                            .OrderByDescending(t => t.NgayLuu)
+                            .Select(t => t.MaViTriNavigation.TenViTri)
+                            .Take(4 - suggestions.Count)
+                            .ToListAsync();
+
+                        suggestions.AddRange(bookmarkedTitles);
+                    }
+                }
+
+                // 3. Nếu là Khách / Chưa đủ 4 gợi ý -> Lấy các vị trí công việc HOT được nộp nhiều nhất hệ thống
+                if (suggestions.Count < 4)
+                {
+                    var popularTitles = await _context.ChiTietViTris
+                        .OrderByDescending(v => v.DonUngTuyens.Count)
+                        .Select(v => v.TenViTri)
+                        .Distinct()
+                        .Take(4 - suggestions.Count)
+                        .ToListAsync();
+
+                    suggestions.AddRange(popularTitles);
+                }
+
+                return Ok(new { success = true, data = suggestions.Distinct().ToList() });
             }
             catch (Exception ex)
             {

@@ -18,13 +18,6 @@ namespace TKVL.Migrations
                 nullable: false,
                 defaultValue: (byte)1);
 
-            migrationBuilder.AddColumn<bool>(
-                name: "TrangThai",
-                table: "GoiDichVu",
-                type: "bit",
-                nullable: false,
-                defaultValue: true);
-
             migrationBuilder.CreateTable(
                 name: "DacQuyen",
                 columns: table => new

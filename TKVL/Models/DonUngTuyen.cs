@@ -22,6 +22,5 @@ public partial class DonUngTuyen
     public virtual Cv MaCvNavigation { get; set; } = null!;
 
     public virtual ChiTietViTri MaViTriNavigation { get; set; } = null!;
-    // Thêm dòng này vào class DonUngTuyen
     public virtual ChiTietPhanTichAi? ChiTietPhanTichAi { get; set; }
 }

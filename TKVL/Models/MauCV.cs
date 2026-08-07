@@ -18,6 +18,8 @@ public partial class MauCV
     [StringLength(255)]
     public string? AnhThumbnail { get; set; }
 
+    public bool IsVip { get; set; }
+
     public bool IsATS { get; set; }
 
     public bool TrangThai { get; set; }

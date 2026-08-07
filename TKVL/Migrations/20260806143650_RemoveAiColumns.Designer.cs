@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260806143650_RemoveAiColumns")]
+    partial class RemoveAiColumns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -732,9 +735,6 @@ namespace TKVL.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaNganh"));
 
-                    b.Property<int?>("MaNganhCha")
-                        .HasColumnType("int");
-
                     b.Property<string>("TenNganh")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -749,8 +749,6 @@ namespace TKVL.Migrations
 
                     b.HasKey("MaNganh")
                         .HasName("PK__NganhNgh__4E0C021750B7BE5B");
-
-                    b.HasIndex("MaNganhCha");
 
                     b.ToTable("NganhNghe", (string)null);
                 });
@@ -1272,16 +1270,6 @@ namespace TKVL.Migrations
                     b.Navigation("MaTinNavigation");
                 });
 
-            modelBuilder.Entity("TKVL.Models.NganhNghe", b =>
-                {
-                    b.HasOne("TKVL.Models.NganhNghe", "NganhCha")
-                        .WithMany("NganhCon")
-                        .HasForeignKey("MaNganhCha")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("NganhCha");
-                });
-
             modelBuilder.Entity("TKVL.Models.PhanLoaiMau", b =>
                 {
                     b.HasOne("TKVL.Models.DanhMucMau", "DanhMucMauNavigation")
@@ -1459,8 +1447,6 @@ namespace TKVL.Migrations
             modelBuilder.Entity("TKVL.Models.NganhNghe", b =>
                 {
                     b.Navigation("ChiTietViTris");
-
-                    b.Navigation("NganhCon");
                 });
 
             modelBuilder.Entity("TKVL.Models.PhuongXa", b =>

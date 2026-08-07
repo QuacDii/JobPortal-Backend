@@ -40,6 +40,14 @@ public partial class User
 
     public DateTime? NgayHetHanRefreshToken { get; set; }
 
+    public bool TrangThaiTimViec { get; set; } = false;
+
+    public bool IsEmailVerified { get; set; } = false;
+
+    public string? OtpCode { get; set; }
+
+    public DateTime? OtpExpiry { get; set; }
+
     public virtual ICollection<Cv> Cvs { get; set; } = new List<Cv>();
 
     public virtual ICollection<GiaoDich> GiaoDiches { get; set; } = new List<GiaoDich>();
