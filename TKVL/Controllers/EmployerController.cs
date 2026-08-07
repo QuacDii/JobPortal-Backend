@@ -237,23 +237,13 @@ namespace TKVL.Controllers
             var user = await _context.Users.FindAsync(currentEmployerId);
             if (user == null) return Unauthorized(new { isPremium = false });
 
-            // Kiểm tra Hạn sử dụng gói (Chấp nhận sai số múi giờ)
-            bool isNotExpired = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value.Date >= DateTime.Now.Date;
-
-            bool hasAiFeature = false;
-            if (isNotExpired)
-            {
-                hasAiFeature = await _context.GiaoDiches
-                    .Include(g => g.MaGoiNavigation)
-                    .AnyAsync(g => g.MaUser == currentEmployerId
-                                && g.TrangThai == true
-                                && g.MaGoiNavigation != null
-                                && (
-                                    g.MaGoi == 3 || g.MaGoi == 4 ||
-                                    (g.MaGoiNavigation.LoaiGoi == 2 && g.MaGoiNavigation.DonViThoiGian == 6) ||
-                                    (g.MaGoiNavigation.LoaiGoi == 3 && g.MaGoiNavigation.DonViThoiGian == 1)
-                                ));
-            }
+            // 🌟 KIỂM TRA TRỰC TIẾP TRONG BẢNG User_DacQuyen VỚI MA_CODE "NTD_AI_MATCHING"
+            bool hasAiFeature = await _context.UserDacQuyens
+                .Include(ud => ud.DacQuyen)
+                .AnyAsync(ud => ud.MaUser == currentEmployerId
+                             && ud.NgayHetHan.Date >= DateTime.Now.Date
+                             && ud.DacQuyen != null
+                             && ud.DacQuyen.MaCode == "NTD_AI_MATCHING");
 
             return Ok(new { isPremium = hasAiFeature });
         }
@@ -671,9 +661,7 @@ namespace TKVL.Controllers
             });
         }
 
-        // ===================================================================
-        // API 1: LẤY SỐ LƯỢT XEM CV CÒN LẠI CỦA DOANH NGHIỆP (ĐỘC LẬP)
-        // ===================================================================
+        // 1. API LẤY SỐ LƯỢT XEM CV + TRẠNG THÁI HẠN GÓI
         [HttpGet("cv-credits")]
         public async Task<IActionResult> GetCvCredits()
         {
@@ -682,15 +670,18 @@ namespace TKVL.Controllers
                 int currentEmployerId = GetCurrentUserId();
                 var user = await _context.Users.FindAsync(currentEmployerId);
 
+                // Kiểm tra xem gói đã hết hạn chưa
+                bool isExpired = user?.NgayHetHanGoi == null || user.NgayHetHanGoi.Value.Date < DateTime.Now.Date;
                 return Ok(new
                 {
                     success = true,
-                    luotXemCvConLai = user?.LuotXemCvConLai ?? 0
+                    luotXemCvConLai = user?.LuotXemCvConLai ?? 0,
+                    isExpired = isExpired
                 });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { success = false, luotXemCvConLai = 0, error = ex.Message });
+                return StatusCode(500, new { success = false, luotXemCvConLai = 0, isExpired = true, error = ex.Message });
             }
         }
 
@@ -899,7 +890,7 @@ namespace TKVL.Controllers
         }
 
 
-        // API mo khoa thong tin lien he cua ung vien
+        // 2. API MỞ KHÓA THÔNG TIN LIÊN HỆ CV (CHUẨN HÓA JSON RESPONSES)
         [HttpPost("unlock-cv/{maCv}")]
         public async Task<IActionResult> UnlockCv(int maCv)
         {
@@ -910,15 +901,19 @@ namespace TKVL.Controllers
                 var user = await _context.Users.FindAsync(currentEmployerId);
                 if (user == null) return Unauthorized(new { success = false, message = "Phiên đăng nhập hết hạn." });
 
-                // Kiem tra thoi han goi va so luong luot xem con lai cua doanh nghiep
-                bool isUserValid = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value >= DateTime.Now;
+                bool isUserValid = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value.Date >= DateTime.Now.Date;
+
                 if (!isUserValid || user.LuotXemCvConLai <= 0)
                 {
-                    return BadRequest("Gói dịch vụ đã hết hạn sử dụng hoặc tài khoản đã hết lượt mở khóa hồ sơ!");
+                    // 🌟 Trả về JSON chuẩn để Frontend không bị crash
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Gói dịch vụ đã hết hạn sử dụng hoặc tài khoản đã hết lượt mở khóa hồ sơ!"
+                    });
                 }
 
                 user.LuotXemCvConLai -= 1;
-
                 _context.LichSuMoKhoaCvs.Add(new LichSuMoKhoaCV
                 {
                     MaUser = currentEmployerId,
@@ -936,6 +931,36 @@ namespace TKVL.Controllers
                 await transaction.RollbackAsync();
                 return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi mở khóa.", error = ex.Message });
             }
+        }
+
+        [HttpPatch("jobs/{maTin}/promote")]
+        public async Task<IActionResult> PromoteJob(int maTin)
+        {
+            int currentUserId = GetCurrentUserId();
+
+            // 1. Kiểm tra đặc quyền NTD_VIP_JOB
+            bool isVipActive = await _context.UserDacQuyens
+                .Include(ud => ud.DacQuyen)
+                .AnyAsync(ud => ud.MaUser == currentUserId
+                             && ud.NgayHetHan.Date >= DateTime.Now.Date
+                             && ud.DacQuyen != null
+                             && ud.DacQuyen.MaCode == "NTD_VIP_JOB");
+
+            if (!isVipActive)
+            {
+                return BadRequest(new { success = false, message = "Tài khoản của bạn chưa đăng ký đặc quyền Đẩy tin VIP!" });
+            }
+
+            // 2. Tìm tin đăng thuộc sở hữu của doanh nghiệp
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+            var job = await _context.TinTuyenDungs.FirstOrDefaultAsync(j => j.MaTin == maTin && j.MaCongTy == company.MaCongTy);
+
+            if (job == null) return NotFound(new { message = "Không tìm thấy tin đăng!" });
+
+            job.IsPromoted = true;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { success = true, message = "Đã nâng cấp tin thành tin VIP Nổi bật!" });
         }
 
         [HttpGet("hunt-cv/industries")]

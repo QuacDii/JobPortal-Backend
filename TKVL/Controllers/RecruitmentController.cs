@@ -86,9 +86,8 @@ namespace TKVL.Controllers
         {
             int maUser = GetCurrentUserId();
 
-            // 🌟 1. Bổ sung Include MaUserNavigation để lấy thông tin tài khoản User liên kết
+            // 1. Kiểm tra thông tin công ty và trạng thái phê duyệt
             var company = await _context.CongTies
-                .Include(c => c.MaUserNavigation)
                 .FirstOrDefaultAsync(c => c.MaUser == maUser);
 
             if (company == null)
@@ -100,10 +99,13 @@ namespace TKVL.Controllers
             if (request.DanhSachViTri == null || request.DanhSachViTri.Count == 0)
                 return BadRequest(new { success = false, message = "Vui lòng thêm ít nhất 1 vị trí công việc!" });
 
-            // ⚡ 2. LOGIC ĐÚNG: Kiểm tra hạn gói dịch vụ trên tài khoản User (NgayHetHanGoi >= DateTime.Now)
-            bool isVipActive = company.MaUserNavigation != null
-                               && company.MaUserNavigation.NgayHetHanGoi.HasValue
-                               && company.MaUserNavigation.NgayHetHanGoi.Value >= DateTime.Now;
+            // 🌟 2. Kiểm tra đặc quyền NTD_VIP_JOB còn hạn trong bảng User_DacQuyen
+            bool isVipActive = await _context.UserDacQuyens
+                .Include(ud => ud.DacQuyen)
+                .AnyAsync(ud => ud.MaUser == maUser
+                             && ud.NgayHetHan.Date >= DateTime.Now.Date
+                             && ud.DacQuyen != null
+                             && ud.DacQuyen.MaCode == "NTD_VIP_JOB");
 
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -115,7 +117,7 @@ namespace TKVL.Controllers
                     NgayHetHan = request.NgayHetHan,
                     NgayDang = DateTime.Now,
                     TrangThai = 0, // 0: Chờ duyệt
-                    IsPromoted = isVipActive // ⚡ Tự động gắn nhãn VIP nếu gói dịch vụ của User còn hạn
+                    IsPromoted = isVipActive // ⚡ Tự động gắn nhãn VIP/Nổi bật nếu sở hữu đặc quyền NTD_VIP_JOB
                 };
 
                 _context.TinTuyenDungs.Add(newCampaign);
@@ -163,6 +165,7 @@ namespace TKVL.Controllers
                                     TenKyNang = keyword,
                                     TrangThai = false
                                 };
+
                                 _context.KyNangs.Add(newSkill);
                                 await _context.SaveChangesAsync();
                                 kyNangEntities.Add(newSkill);
@@ -248,16 +251,23 @@ namespace TKVL.Controllers
         }
 
         // =================================================================================
-        // 6. API: Chi tiết chấm điểm AI & Bóc tách CV (Màn hình chi tiết độc lập)
+        // 6. API: Chi tiết chấm điểm AI & Bóc tách CV (Tự động Re-Analyze khi NTD nâng VIP)
         // =================================================================================
         [HttpGet("applications/{maDon}/ai-details")]
-        public async Task<IActionResult> GetAiAnalysisDetail(int maDon)
+        public async Task<IActionResult> GetAiAnalysisDetail(
+            int maDon,
+            [FromServices] Services.IAiAnalysisService aiAnalysisService) // 🌟 Inject AI Service
         {
             try
             {
+                // 🌟 Nạp đầy đủ thông tin User chủ sở hữu Doanh nghiệp
                 var application = await _context.DonUngTuyens
                     .Include(d => d.ChiTietPhanTichAi)
                     .Include(d => d.MaCvNavigation)
+                    .Include(d => d.MaViTriNavigation)
+                        .ThenInclude(v => v.MaTinNavigation)
+                            .ThenInclude(t => t.MaCongTyNavigation)
+                                .ThenInclude(c => c.MaUserNavigation)
                     .FirstOrDefaultAsync(d => d.MaDon == maDon);
 
                 if (application == null)
@@ -271,10 +281,35 @@ namespace TKVL.Controllers
                     await _context.SaveChangesAsync();
                 }
 
+                // 🌟 1. Kiểm tra xem Nhà tuyển dụng sở hữu tin này hiện có đang là VIP hay không
+                var userCongTy = application.MaViTriNavigation?.MaTinNavigation?.MaCongTyNavigation?.MaUserNavigation;
+                bool isVipActive = userCongTy != null
+                                && userCongTy.NgayHetHanGoi.HasValue
+                                && userCongTy.NgayHetHanGoi >= DateTime.Now;
+
                 var aiData = application.ChiTietPhanTichAi;
+
+                // 🌟 2. NẾU LÀ NTD VIP NHƯNG DỮ LIỆU ĐANG LÀ BẢN GHI RÁC (Chưa phân tích / Điểm 0 / Nhắc nâng cấp)
+                bool isDummyRecord = aiData == null
+                                  || aiData.DiemMatchingTong == 0
+                                  || aiData.ThongTinHoSoTrichXuatJson == "{}"
+                                  || (aiData.DiemManhTieuBieu != null && aiData.DiemManhTieuBieu.Contains("nâng cấp gói"));
+
+                if (isVipActive && isDummyRecord)
+                {
+                    // Kích hoạt AI bóc tách & chấm điểm đè lên record rỗng cũ
+                    bool reAnalyzeSuccess = await aiAnalysisService.AnalyzeApplicationAsync(maDon);
+
+                    if (reAnalyzeSuccess)
+                    {
+                        // Reload lại dữ liệu ChiTietPhanTichAi mới vừa lưu vào DB
+                        await _context.Entry(application).Reference(d => d.ChiTietPhanTichAi).LoadAsync();
+                        aiData = application.ChiTietPhanTichAi;
+                    }
+                }
+
                 string extractionJson = aiData?.ThongTinHoSoTrichXuatJson;
 
-                // Kích hoạt cơ chế phòng vệ nếu chuỗi thông tin AI trống
                 if (string.IsNullOrEmpty(extractionJson) || extractionJson == "{}")
                 {
                     extractionJson = MapCvBuilderToAiProfileJson(application.MaCvNavigation?.DuLieuCv);

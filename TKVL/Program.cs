@@ -21,7 +21,7 @@ builder.Services.AddSwaggerGen();
 // Đăng ký HttpClient chung
 builder.Services.AddHttpClient();
 
-// Đăng ký các Service AI & OCR
+// Đăng ký các Service AI
 builder.Services.AddHttpClient<IAiService, AiService>();
 builder.Services.AddHttpClient<IAiAnalysisService, AiAnalysisService>();
 
@@ -42,6 +42,8 @@ var account = new Account(
 var cloudinary = new Cloudinary(account);
 builder.Services.AddSingleton(cloudinary);
 builder.Services.AddScoped<ICloudinaryService, CloudinaryService>();
+
+builder.Services.Configure<VnPayConfig>(builder.Configuration.GetSection("VnPay"));
 
 // 4. Cấu hình dịch vụ Thanh toán MoMo
 builder.Services.Configure<TKVL.DTOs.Payment.MomoConfig>(builder.Configuration.GetSection("MomoAPI"));
