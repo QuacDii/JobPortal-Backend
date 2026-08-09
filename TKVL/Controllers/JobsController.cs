@@ -70,13 +70,13 @@ namespace TKVL.Controllers
         // API 2: GET /api/jobs/search (BỘ LỌC NÂNG CAO ĐA CHIỀU)
         [HttpGet("search")]
         public async Task<IActionResult> SearchJobs(
-     [FromQuery] string? keyword,
-     [FromQuery] int? maTP,
-     [FromQuery] int? maPhuong,
-     [FromQuery] int? maNganh,
-     [FromQuery] string? capBac,  
-     [FromQuery] string? mucLuong  
- )
+             [FromQuery] string? keyword,
+             [FromQuery] int? maTP,
+             [FromQuery] int? maPhuong,
+             [FromQuery] int? maNganh,
+             [FromQuery] string? capBac,  
+             [FromQuery] string? mucLuong  
+         )
         {
             try
             {
@@ -189,7 +189,7 @@ namespace TKVL.Controllers
                         moTaCongViec = v.MoTaCongViec,
                         yeuCauUngVien = v.YeuCauUngVien,
                         quyenLoi = v.QuyenLoi,
-
+                        capBac = v.CapBac,
                         phuongXa = v.MaPhuongNavigation.TenPhuong,
                         locationName = v.MaPhuongNavigation.MaTpNavigation.TenTp
                     }).ToList()

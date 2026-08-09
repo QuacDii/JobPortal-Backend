@@ -10,12 +10,7 @@ namespace TKVL.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "TrangThai",
-                table: "GoiDichVu",
-                type: "bit",
-                nullable: false,
-                defaultValue: false);
+
         }
 
         /// <inheritdoc />
