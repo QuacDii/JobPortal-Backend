@@ -41,25 +41,7 @@ namespace TKVL.Controllers
         }
 
         // =================================================================
-        // 2. API LẤY DANH SÁCH NGÀNH NGHỀ (ĐÃ BỔ SUNG MaNganhCha)
-        // =================================================================
-        [HttpGet("industries")]
-        [AllowAnonymous]
-        public async Task<IActionResult> GetIndustries()
-        {
-            var industries = await _context.NganhNghes
-                .Where(n => n.TrangThai == true)
-                .Select(n => new {
-                    value = n.MaNganh,
-                    label = n.TenNganh,
-                    maNganhCha = n.MaNganhCha // 🌟 Thêm trường này để Frontend hỗ trợ ngành nghề phân cấp
-                })
-                .ToListAsync();
-            return Ok(industries);
-        }
-
-        // =================================================================
-        // 3. API LẤY DANH SÁCH TỈNH THÀNH & PHƯỜNG XÃ DẠNG CÂY
+        // 2. API LẤY DANH SÁCH TỈNH THÀNH & PHƯỜNG XÃ DẠNG CÂY
         // =================================================================
         [HttpGet("locations")]
         [AllowAnonymous]
@@ -80,7 +62,7 @@ namespace TKVL.Controllers
         }
 
         // =================================================================
-        // 4. API ĐĂNG TIN CHIẾN DỊCH MASTER - DETAIL
+        // 3. API ĐĂNG TIN CHIẾN DỊCH MASTER - DETAIL
         // =================================================================
         [HttpPost("post-job")]
         public async Task<IActionResult> PostJobCampaign([FromBody] PostJobRequestDto request)
@@ -136,7 +118,7 @@ namespace TKVL.Controllers
                         MoTaCongViec = posDto.MoTaCongViec,
                         YeuCauUngVien = posDto.YeuCauUngVien,
                         QuyenLoi = posDto.QuyenLoi,
-                        MaNganh = posDto.MaNganh,
+                        MaNganhCon = posDto.MaNganh, // 🌟 Đã sửa: MaNganh -> MaNganhCon
                         MaPhuong = posDto.MaPhuong,
                         NganhNgheKhac = posDto.NganhNgheKhac
                     };
@@ -189,7 +171,7 @@ namespace TKVL.Controllers
         }
 
         // =================================================================================
-        // 5. API: Lấy phễu ứng viên (Màn hình Talent Pool & Danh sách xếp hạng)
+        // 4. API: Lấy phễu ứng viên (Màn hình Talent Pool & Danh sách xếp hạng)
         // =================================================================================
         [HttpGet("jobs/{maViTri}/applications")]
         public async Task<IActionResult> GetApplicationsByJob(int maViTri, [FromQuery] int? minMatch, [FromQuery] int? maxMatch, [FromQuery] int? trangThai)
@@ -250,16 +232,15 @@ namespace TKVL.Controllers
         }
 
         // =================================================================================
-        // 6. API: Chi tiết chấm điểm AI & Bóc tách CV (Tự động Re-Analyze khi NTD nâng VIP)
+        // 5. API: Chi tiết chấm điểm AI & Bóc tách CV (Tự động Re-Analyze khi NTD nâng VIP)
         // =================================================================================
         [HttpGet("applications/{maDon}/ai-details")]
         public async Task<IActionResult> GetAiAnalysisDetail(
             int maDon,
-            [FromServices] Services.IAiAnalysisService aiAnalysisService) // 🌟 Inject AI Service
+            [FromServices] Services.IAiAnalysisService aiAnalysisService)
         {
             try
             {
-                // 🌟 Nạp đầy đủ thông tin User chủ sở hữu Doanh nghiệp
                 var application = await _context.DonUngTuyens
                     .Include(d => d.ChiTietPhanTichAi)
                     .Include(d => d.MaCvNavigation)
@@ -280,7 +261,6 @@ namespace TKVL.Controllers
                     await _context.SaveChangesAsync();
                 }
 
-                // 🌟 1. Kiểm tra xem Nhà tuyển dụng sở hữu tin này hiện có đang là VIP hay không
                 var userCongTy = application.MaViTriNavigation?.MaTinNavigation?.MaCongTyNavigation?.MaUserNavigation;
                 bool isVipActive = userCongTy != null
                                 && userCongTy.NgayHetHanGoi.HasValue
@@ -288,7 +268,6 @@ namespace TKVL.Controllers
 
                 var aiData = application.ChiTietPhanTichAi;
 
-                // 🌟 2. NẾU LÀ NTD VIP NHƯNG DỮ LIỆU ĐANG LÀ BẢN GHI RÁC (Chưa phân tích / Điểm 0 / Nhắc nâng cấp)
                 bool isDummyRecord = aiData == null
                                   || aiData.DiemMatchingTong == 0
                                   || aiData.ThongTinHoSoTrichXuatJson == "{}"
@@ -296,12 +275,10 @@ namespace TKVL.Controllers
 
                 if (isVipActive && isDummyRecord)
                 {
-                    // Kích hoạt AI bóc tách & chấm điểm đè lên record rỗng cũ
                     bool reAnalyzeSuccess = await aiAnalysisService.AnalyzeApplicationAsync(maDon);
 
                     if (reAnalyzeSuccess)
                     {
-                        // Reload lại dữ liệu ChiTietPhanTichAi mới vừa lưu vào DB
                         await _context.Entry(application).Reference(d => d.ChiTietPhanTichAi).LoadAsync();
                         aiData = application.ChiTietPhanTichAi;
                     }

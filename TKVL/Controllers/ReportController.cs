@@ -95,11 +95,12 @@ namespace TKVL.Controllers
                         Value = g.Count()
                     }).ToListAsync();
 
+                // 🌟 ĐÃ SỬA: Chuyển sang Join NganhNgheCons và MaNganhCon
                 var hotIndustries = await (from c in _context.ChiTietViTris
                                            join t in _context.TinTuyenDungs on c.MaTin equals t.MaTin
-                                           join n in _context.NganhNghes on c.MaNganh equals n.MaNganh
+                                           join n in _context.NganhNgheCons on c.MaNganhCon equals n.MaNganhCon
                                            where t.TrangThai == 1 && t.NgayHetHan >= DateTime.Now
-                                           group c by n.TenNganh into g
+                                           group c by n.TenNganhCon into g
                                            select new { Name = g.Key, Value = g.Count() })
                                            .OrderByDescending(x => x.Value).Take(5).ToListAsync();
 
@@ -167,7 +168,6 @@ namespace TKVL.Controllers
                 }
                 if (type == "revenue")
                 {
-                    // 👉 CHỈ LẤY GIAO DỊCH MUA GÓI (g.MaGoi != null và Inner Join bắt buộc có gói)
                     var query = from g in _context.GiaoDiches
                                 join u in _context.Users on g.MaUser equals u.MaUser
                                 join p in _context.GoiDichVus on g.MaGoi equals p.MaGoi
@@ -175,7 +175,7 @@ namespace TKVL.Controllers
                                 select new { g, u, p };
 
                     if (maGoi.HasValue) query = query.Where(x => x.g.MaGoi == maGoi.Value);
-                    if (vaiTro.HasValue) query = query.Where(x => x.u.VaiTro == vaiTro.Value); 
+                    if (vaiTro.HasValue) query = query.Where(x => x.u.VaiTro == vaiTro.Value);
 
                     var data = await query.Select(x => new
                     {

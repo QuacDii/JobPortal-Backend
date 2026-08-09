@@ -24,7 +24,7 @@ namespace TKVL.Controllers
         public class CreateJobAlertDto
         {
             public int MaUser { get; set; }
-            public int MaNganh { get; set; }
+            public int MaNganhCon { get; set; } // 🌟 Đã sửa: MaNganh -> MaNganhCon
             public string? TuKhoaKyNang { get; set; }
             public bool TrangThai { get; set; }
         }
@@ -48,8 +48,18 @@ namespace TKVL.Controllers
             try
             {
                 var alerts = await _context.JobAlerts
+                    .Include(a => a.MaNganhConNavigation) // 🌟 Include ngành nghề con để lấy tên ngành
                     .Where(a => a.MaUser == userId)
-                    .OrderByDescending(a => a.MaAlert) // Xếp thông báo mới tạo lên đầu
+                    .OrderByDescending(a => a.MaAlert)
+                    .Select(a => new
+                    {
+                        a.MaAlert,
+                        a.MaUser,
+                        a.MaNganhCon,
+                        tenNganhCon = a.MaNganhConNavigation != null ? a.MaNganhConNavigation.TenNganhCon : null,
+                        a.TuKhoaKyNang,
+                        a.TrangThai
+                    })
                     .ToListAsync();
 
                 return Ok(alerts);
@@ -68,29 +78,20 @@ namespace TKVL.Controllers
             try
             {
                 // 1. Kiểm tra trùng lặp
-                var exists = await _context.JobAlerts.AnyAsync(a => a.MaUser == dto.MaUser && a.MaNganh == dto.MaNganh);
+                var exists = await _context.JobAlerts.AnyAsync(a => a.MaUser == dto.MaUser && a.MaNganhCon == dto.MaNganhCon); // 🌟 Đã sửa: MaNganhCon
                 if (exists) return BadRequest(new { message = "Bạn đã cài đặt thông báo cho ngành nghề này rồi!" });
 
                 // 2. Tạo đối tượng mới
                 var alert = new JobAlert
                 {
                     MaUser = dto.MaUser,
-                    MaNganh = dto.MaNganh,
+                    MaNganhCon = dto.MaNganhCon, // 🌟 Đã sửa: MaNganhCon
                     TuKhoaKyNang = dto.TuKhoaKyNang,
                     TrangThai = dto.TrangThai
                 };
 
-                // 3. Đưa vào trạng thái chuẩn bị lưu
+                // 3. Đưa vào DbContext
                 _context.JobAlerts.Add(alert);
-
-                // Gán giá trị trực tiếp cho cột ẩn (Shadow Property) dưới DB
-                try
-                {
-                    _context.Entry(alert).Property("MaNganhNavigationMaNganh").CurrentValue = dto.MaNganh;
-                }
-                catch
-                {
-                }
 
                 // 4. Lưu xuống Database
                 await _context.SaveChangesAsync();
@@ -99,7 +100,6 @@ namespace TKVL.Controllers
             }
             catch (Exception ex)
             {
-                // Bắt lỗi chi tiết nhất từ Entity Framework
                 var errorMessage = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
                 return BadRequest(new { message = errorMessage });
             }
@@ -118,7 +118,6 @@ namespace TKVL.Controllers
                     return NotFound(new { message = "Không tìm thấy thông báo cần sửa!" });
                 }
 
-                // Cập nhật trạng thái
                 alert.TrangThai = dto.TrangThai;
                 await _context.SaveChangesAsync();
 
@@ -131,6 +130,7 @@ namespace TKVL.Controllers
         }
 
         // 4. XÓA JOB ALERT
+        // DELETE: api/JobAlerts/{id}
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAlert(int id)
         {

@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TKVL.Models;
 
@@ -9,11 +11,15 @@ public partial class ChiTietViTri
 
     public int MaTin { get; set; }
 
-    public int MaNganh { get; set; }
+    public int MaNganhCon { get; set; }
 
     public int MaPhuong { get; set; }
 
     public string TenViTri { get; set; } = null!;
+
+    [StringLength(100)]
+    public string? KinhNghiem { get; set; }
+
     public string? CapBac { get; set; }
 
     public string Luong { get; set; } = null!;
@@ -25,11 +31,13 @@ public partial class ChiTietViTri
     public string QuyenLoi { get; set; } = null!;
 
     public int SoLuongTuyen { get; set; }
+
     public string? NganhNgheKhac { get; set; }
 
     public virtual ICollection<DonUngTuyen> DonUngTuyens { get; set; } = new List<DonUngTuyen>();
 
-    public virtual NganhNghe MaNganhNavigation { get; set; } = null!;
+    [ForeignKey("MaNganhCon")]
+    public virtual NganhNgheCon? MaNganhConNavigation { get; set; }
 
     public virtual PhuongXa MaPhuongNavigation { get; set; } = null!;
 

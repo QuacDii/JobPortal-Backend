@@ -1,6 +1,10 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 using TKVL.Dtos;
 using TKVL.Models;
 using TKVL.Services;
@@ -13,72 +17,112 @@ namespace TKVL.Controllers
     {
         private readonly JobPortalDbContext _context;
         private readonly IEmailService _emailService;
+        private readonly IServiceScopeFactory _scopeFactory;
 
-        public UserController(JobPortalDbContext context, IEmailService emailService)
+        public UserController(
+            JobPortalDbContext context,
+            IEmailService emailService,
+            IServiceScopeFactory scopeFactory)
         {
             _context = context;
             _emailService = emailService;
+            _scopeFactory = scopeFactory;
         }
 
+        // =========================================================
+        // API 1: GET /api/User/profile/{id} (LẤY THÔNG TIN PROFILE)
+        // =========================================================
         [HttpGet("profile/{id}")]
-        public async Task<IActionResult> GetProfile(int id)
+        public async Task<IActionResult> GetUserProfile(int id)
         {
-            var user = await _context.Users.FindAsync(id);
-            if (user == null) return NotFound();
-
-            return Ok(new
+            try
             {
-                HoTen = user.HoTen,
-                Email = user.Email,
-                TrangThaiTimViec = user.TrangThaiTimViec
-            });
+                var user = await _context.Users.FindAsync(id);
+                if (user == null)
+                    return NotFound(new { success = false, message = "Không tìm thấy người dùng!" });
+
+                return Ok(new
+                {
+                    success = true,
+                    maUser = user.MaUser,
+                    hoTen = user.HoTen ?? "",
+                    email = user.Email ?? "",
+                    isEmailVerified = user.IsEmailVerified == true,
+                    trangThaiTimViec = user.TrangThaiTimViec != null && Convert.ToInt32(user.TrangThaiTimViec) == 1
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi xử lý Server!", error = ex.Message });
+            }
         }
 
+        // =========================================================
+        // API 2: PUT /api/User/profile/{id} (CẬP NHẬT PROFILE)
+        // =========================================================
+        [HttpPut("profile/{id}")]
+        public async Task<IActionResult> UpdateUserProfile(int id, [FromBody] UpdateProfileDto dto)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(id);
+                if (user == null)
+                    return NotFound(new { success = false, message = "Không tìm thấy người dùng!" });
+
+                user.HoTen = dto.HoTen;
+                await _context.SaveChangesAsync();
+
+                return Ok(new { success = true, message = "Cập nhật họ tên thành công!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống!", error = ex.Message });
+            }
+        }
+
+        // =========================================================
+        // API 3: PUT /api/User/toggle-job-search/{id} (BẬT/TẮT TÌM VIỆC)
+        // =========================================================
         [HttpPut("toggle-job-search/{id}")]
         public async Task<IActionResult> ToggleJobSearch(int id, [FromBody] ToggleJobSearchDto dto)
         {
             try
             {
-                // 1. Tìm user
                 var user = await _context.Users.FindAsync(id);
                 if (user == null)
                 {
                     return NotFound(new { success = false, message = "Không tìm thấy thông tin tài khoản!" });
                 }
 
-                // 2. Cập nhật trạng thái
                 user.TrangThaiTimViec = dto.IsSearching;
                 _context.Users.Update(user);
                 await _context.SaveChangesAsync();
 
-                // =========================================================
-                // 3. LOGIC GỬI EMAIL GỢI Ý CÔNG VIỆC (CHỈ CHẠY KHI BẬT)
-                // =========================================================
                 if (dto.IsSearching)
                 {
+                    string userEmail = user.Email;
+                    string userHoTen = user.HoTen;
+
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            // Tạo scope mới vì đang chạy thread ẩn (Fire-and-forget)
-                            using var scope = HttpContext.RequestServices.CreateScope();
+                            using var scope = _scopeFactory.CreateScope();
                             var db = scope.ServiceProvider.GetRequiredService<JobPortalDbContext>();
                             var emailSvc = scope.ServiceProvider.GetRequiredService<IEmailService>();
 
-                            // a. Lấy các ngành nghề mà User đã cài đặt trong JobAlerts
                             var nganhIds = await db.JobAlerts
                                 .Where(a => a.MaUser == id && a.TrangThai == true)
-                                .Select(a => a.MaNganh)
+                                .Select(a => a.MaNganhCon)
                                 .ToListAsync();
 
                             if (nganhIds.Any())
                             {
-                                // b. Tìm 5 công việc phù hợp nhất (Cùng ngành, Còn hạn, Đang mở)
                                 var matchingJobs = await (from vt in db.ChiTietViTris
                                                           join tin in db.TinTuyenDungs on vt.MaTin equals tin.MaTin
-                                                          join ct in db.CongTies on tin.MaTin equals ct.MaCongTy
-                                                          where nganhIds.Contains(vt.MaNganh)
-                                                             && tin.TrangThai == 1 // Trạng thái đang tuyển
+                                                          join ct in db.CongTies on tin.MaCongTy equals ct.MaCongTy
+                                                          where nganhIds.Contains(vt.MaNganhCon)
+                                                             && tin.TrangThai == 1
                                                              && tin.NgayHetHan >= DateTime.Now
                                                           orderby tin.NgayHetHan descending
                                                           select new
@@ -90,7 +134,6 @@ namespace TKVL.Controllers
                                                               ct.Logo
                                                           }).Take(5).ToListAsync();
 
-                                // c. Nếu có công việc phù hợp -> Soạn HTML và gửi mail
                                 if (matchingJobs.Any())
                                 {
                                     string jobListHtml = "";
@@ -113,7 +156,7 @@ namespace TKVL.Controllers
                                             <h2 style='color: #00b14f; margin: 0;'>JOBSNOW TÌM VIỆC</h2>
                                             <p style='color: #666; margin: 5px 0 0 0;'>Cơ hội tuyệt vời dành riêng cho bạn</p>
                                         </div>
-                                        <p>Chào <b>{user.HoTen}</b>,</p>
+                                        <p>Chào <b>{userHoTen}</b>,</p>
                                         <p>Chúc mừng bạn đã bật trạng thái tìm việc! Dựa vào các <b>Thông báo việc làm (Job Alerts)</b> bạn đã cài đặt, hệ thống JOBSNOW vừa tìm thấy một số vị trí cực kỳ phù hợp với bạn hiện nay:</p>
                                         
                                         {jobListHtml}
@@ -123,7 +166,7 @@ namespace TKVL.Controllers
                                         </p>
                                     </div>";
 
-                                    await emailSvc.SendEmailAsync(user.Email, "[JOBSNOW] Việc làm mới nhất phù hợp với bạn!", emailBody);
+                                    await emailSvc.SendEmailAsync(userEmail, "[JOBSNOW] Việc làm mới nhất phù hợp với bạn!", emailBody);
                                 }
                             }
                         }
@@ -131,7 +174,7 @@ namespace TKVL.Controllers
                         {
                             Console.WriteLine($"[LỖI GỬI EMAIL GỢI Ý JOB]: {emailEx.Message}");
                         }
-                    }); // Hết Task.Run
+                    });
                 }
 
                 return Ok(new
@@ -147,12 +190,14 @@ namespace TKVL.Controllers
             }
         }
 
+        // =========================================================
+        // API 4: GET /api/User (LẤY DANH SÁCH TẤT CẢ USER FOR ADMIN)
+        // =========================================================
         [HttpGet]
         public async Task<IActionResult> GetAllUsers()
         {
             try
             {
-                // Lấy danh sách user và sắp xếp người mới đăng ký lên đầu
                 var users = await _context.Users
                     .Select(u => new
                     {
@@ -168,17 +213,15 @@ namespace TKVL.Controllers
 
                 return Ok(users);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 return StatusCode(500, new { message = "Lỗi khi lấy dữ liệu người dùng", error = ex.Message });
             }
         }
 
-        public class ToggleStatusDto
-        {
-            public bool TrangThai { get; set; }
-        }
-
+        // =========================================================
+        // API 5: PUT /api/User/toggle-status/{id} (KHÓA / MỞ KHÓA USER)
+        // =========================================================
         [HttpPut("toggle-status/{id}")]
         public async Task<IActionResult> ToggleStatus(int id, [FromBody] ToggleStatusDto dto)
         {
@@ -190,22 +233,73 @@ namespace TKVL.Controllers
                     return NotFound(new { message = "Không tìm thấy người dùng!" });
                 }
 
-                // Chốt chặn bảo mật: Nếu là Admin (VaiTro == 0) thì không cho phép khóa (TrangThai = false)
                 if (user.VaiTro == 0 && dto.TrangThai == false)
                 {
                     return BadRequest(new { message = "Không thể khóa tài khoản của Quản trị viên!" });
                 }
 
-                // Cập nhật trạng thái
                 user.TrangThai = dto.TrangThai;
                 await _context.SaveChangesAsync();
 
                 return Ok(new { success = true, message = "Cập nhật trạng thái thành công!" });
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 return StatusCode(500, new { message = "Lỗi hệ thống khi cập nhật trạng thái", error = ex.Message });
             }
         }
+
+        // =========================================================
+        // API 6: DELETE /api/User/{id} (XÓA TÀI KHOẢN VĨNH VIỄN)
+        // =========================================================
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteUser(int id)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(id);
+                if (user == null)
+                {
+                    return NotFound(new { success = false, message = "Không tìm thấy tài khoản người dùng!" });
+                }
+
+                if (user.VaiTro == 0)
+                {
+                    return BadRequest(new { success = false, message = "Không thể xóa tài khoản Quản trị viên!" });
+                }
+
+                var tinDaLuus = await _context.TinDaLuus.Where(t => t.MaUser == id).ToListAsync();
+                _context.TinDaLuus.RemoveRange(tinDaLuus);
+
+                var ungVienDaLuus = await _context.UngVienDaLuus.Where(u => u.MaUser == id).ToListAsync();
+                _context.UngVienDaLuus.RemoveRange(ungVienDaLuus);
+
+                var jobAlerts = await _context.JobAlerts.Where(j => j.MaUser == id).ToListAsync();
+                _context.JobAlerts.RemoveRange(jobAlerts);
+
+                var lichSuMoKhoas = await _context.LichSuMoKhoaCvs.Where(l => l.MaUser == id).ToListAsync();
+                _context.LichSuMoKhoaCvs.RemoveRange(lichSuMoKhoas);
+
+                _context.Users.Remove(user);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { success = true, message = "Đã xóa vĩnh viễn tài khoản và giải phóng Email thành công!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi xóa tài khoản!", error = ex.Message });
+            }
+        }
+    }
+
+    // Các DTO hỗ trợ
+    public class ToggleStatusDto
+    {
+        public bool TrangThai { get; set; }
+    }
+
+    public class UpdateProfileDto
+    {
+        public string? HoTen { get; set; }
     }
 }
