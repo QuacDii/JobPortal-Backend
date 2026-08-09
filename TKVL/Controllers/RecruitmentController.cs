@@ -24,20 +24,39 @@ namespace TKVL.Controllers
         }
 
         // =================================================================
-        // 1. API TRẢ VỀ DANH SÁCH GỢI Ý KỸ NĂNG CHO FRONTEND
+        // 1. API TRẢ VỀ DANH SÁCH GỢI Ý KỸ NĂNG CHO FRONTEND (CÓ HỖ TRỢ LỌC THEO NGÀNH CON)
         // =================================================================
         [HttpGet("skills")]
         [AllowAnonymous]
-        public async Task<IActionResult> GetStandardSkills()
+        public async Task<IActionResult> GetStandardSkills([FromQuery] int? maNganhCon)
         {
-            var skills = await _context.KyNangs
-                .Where(k => k.TrangThai == true)
+            var q = _context.KyNangs.Where(k => k.TrangThai == true);
+
+            List<string> recommended = new();
+            if (maNganhCon.HasValue && maNganhCon.Value > 0)
+            {
+                // Lấy danh sách tên kỹ năng từng được sử dụng trong Ngành con này
+                recommended = await q
+                    .Where(k => k.MaViTris.Any(v => v.MaNganhCon == maNganhCon.Value))
+                    .OrderBy(k => k.TenKyNang)
+                    .Select(k => k.TenKyNang)
+                    .Distinct()
+                    .Take(15)
+                    .ToListAsync();
+            }
+
+            var allSkills = await q
                 .Select(k => new {
                     value = k.TenKyNang,
                     label = k.TenKyNang
                 })
                 .ToListAsync();
-            return Ok(skills);
+
+            return Ok(new
+            {
+                all = allSkills,
+                recommended = recommended
+            });
         }
 
         // =================================================================
@@ -398,6 +417,50 @@ namespace TKVL.Controllers
             catch
             {
                 return "{}";
+            }
+        }
+
+        // =================================================================================
+        // 6. API: Kích hoạt phân tích AI thủ công (Re-Analyze) cho một đơn ứng tuyển
+        // =================================================================================
+        [HttpPost("applications/{maDon}/re-analyze")]
+        public async Task<IActionResult> TriggerReAnalyze(
+            int maDon,
+            [FromServices] Services.IAiAnalysisService aiAnalysisService)
+        {
+            try
+            {
+                var application = await _context.DonUngTuyens
+                    .Include(d => d.MaViTriNavigation)
+                        .ThenInclude(v => v.MaTinNavigation)
+                            .ThenInclude(t => t.MaCongTyNavigation)
+                    .FirstOrDefaultAsync(d => d.MaDon == maDon);
+
+                if (application == null)
+                {
+                    return NotFound(new { success = false, message = "Không tìm thấy đơn ứng tuyển!" });
+                }
+
+                // Kiểm tra quyền: Nhà tuyển dụng hiện tại có phải chủ sở hữu bài đăng không?
+                int currentUserId = GetCurrentUserId();
+                if (application.MaViTriNavigation?.MaTinNavigation?.MaCongTyNavigation?.MaUser != currentUserId)
+                {
+                    return StatusCode(403, new { success = false, message = "Bạn không có quyền thao tác trên đơn ứng tuyển này!" });
+                }
+
+                // Gọi service AI phân tích lại
+                bool reAnalyzeSuccess = await aiAnalysisService.AnalyzeApplicationAsync(maDon);
+
+                if (reAnalyzeSuccess)
+                {
+                    return Ok(new { success = true, message = "Đã phân tích và cập nhật dữ liệu AI thành công!" });
+                }
+
+                return BadRequest(new { success = false, message = "Không thể phân tích hồ sơ lúc này. Vui lòng thử lại sau!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi phân tích AI!", error = ex.Message });
             }
         }
 

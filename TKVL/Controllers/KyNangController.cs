@@ -21,7 +21,7 @@ namespace TKVL.Controllers
 
         // 1. API DÀNH CHO USER: Lấy danh sách kỹ năng đã được Admin DUYỆT để gợi ý (Auto-complete)
         [HttpGet("suggestions")]
-        public async Task<IActionResult> GetSuggestions([FromQuery] string? query)
+        public async Task<IActionResult> GetSuggestions([FromQuery] string? query, [FromQuery] int? maNganhCon)
         {
             var q = _context.KyNangs.Where(k => k.TrangThai == true);
 
@@ -31,34 +31,81 @@ namespace TKVL.Controllers
                 q = q.Where(k => k.TenKyNang.ToLower().Contains(cleanQuery));
             }
 
+            // Nếu có maNganhCon: Lấy các kỹ năng thuộc ngành con đó làm gợi ý ưu tiên
+            if (maNganhCon.HasValue && maNganhCon.Value > 0)
+            {
+                var recommended = await q
+                    .Where(k => k.MaViTris.Any(v => v.MaNganhCon == maNganhCon.Value))
+                    .Select(k => new { k.MaKyNang, k.TenKyNang, isRecommended = true })
+                    .Take(15)
+                    .ToListAsync();
+
+                var others = await q
+                    .Where(k => !k.MaViTris.Any(v => v.MaNganhCon == maNganhCon.Value))
+                    .Select(k => new { k.MaKyNang, k.TenKyNang, isRecommended = false })
+                    .Take(25)
+                    .ToListAsync();
+
+                return Ok(new { recommended, all = recommended.Concat(others).ToList() });
+            }
+
             var suggestions = await q
                 .OrderBy(k => k.TenKyNang)
-                .Select(k => new { k.MaKyNang, k.TenKyNang })
-                .Take(20)
+                .Select(k => new { k.MaKyNang, k.TenKyNang, isRecommended = false })
+                .Take(30)
                 .ToListAsync();
 
-            return Ok(suggestions);
+            return Ok(new { recommended = new List<object>(), all = suggestions });
         }
 
-        // 2. API DÀNH CHO ADMIN: Lấy danh sách kỹ năng kèm bộ lọc
+        // 2. API DÀNH CHO ADMIN: Lấy danh sách kỹ năng KÈM CỘT THUỘC NGÀNH NGHỀ
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] string? search, [FromQuery] bool? status)
         {
-            var q = _context.KyNangs.AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(search))
+            try
             {
-                string cleanSearch = search.Trim().ToLower();
-                q = q.Where(k => k.TenKyNang.ToLower().Contains(cleanSearch));
-            }
+                var q = _context.KyNangs.AsQueryable();
 
-            if (status.HasValue)
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    string cleanSearch = search.Trim().ToLower();
+                    q = q.Where(k => k.TenKyNang.ToLower().Contains(cleanSearch));
+                }
+
+                if (status.HasValue)
+                {
+                    q = q.Where(k => k.TrangThai == status.Value);
+                }
+
+                // 🌟 BƯỚC 1: Truy vấn SQL lấy entity kèm các bảng liên quan
+                var rawList = await q
+                    .Include(k => k.MaViTris)
+                        .ThenInclude(v => v.MaNganhConNavigation)
+                            .ThenInclude(nc => nc != null ? nc.NganhNgheChaNavigation : null)
+                    .OrderByDescending(k => k.MaKyNang)
+                    .ToListAsync();
+
+                // 🌟 BƯỚC 2: Bóc tách chuỗi Ngành cha > Ngành con trên bộ nhớ (In-Memory)
+                var list = rawList.Select(k => new
+                {
+                    k.MaKyNang,
+                    k.TenKyNang,
+                    k.TrangThai,
+                    danhSachNganh = k.MaViTris
+                        .Where(v => v.MaNganhConNavigation != null)
+                        .Select(v => v.MaNganhConNavigation!.NganhNgheChaNavigation != null
+                            ? $"{v.MaNganhConNavigation.NganhNgheChaNavigation.TenNganhCha} > {v.MaNganhConNavigation.TenNganhCon}"
+                            : v.MaNganhConNavigation!.TenNganhCon)
+                        .Distinct()
+                        .ToList()
+                }).ToList();
+
+                return Ok(list);
+            }
+            catch (Exception ex)
             {
-                q = q.Where(k => k.TrangThai == status.Value);
+                return StatusCode(500, new { success = false, message = "Lỗi khi lấy danh sách kỹ năng", error = ex.Message });
             }
-
-            var list = await q.OrderByDescending(k => k.MaKyNang).ToListAsync();
-            return Ok(list);
         }
 
         // 3. TẠO MỚI / CHUẨN HÓA KHI TẠO (Chống tạo trùng tên)
@@ -70,19 +117,18 @@ namespace TKVL.Controllers
 
             string cleanName = request.TenKyNang.Trim();
 
-            // Kiểm tra xem đã tồn tại kỹ năng nào trùng tên (không phân biệt hoa thường)
             var existing = await _context.KyNangs
                 .FirstOrDefaultAsync(k => k.TenKyNang.ToLower() == cleanName.ToLower());
 
             if (existing != null)
             {
-                return Ok(existing); // Trả về kỹ năng đã có sẵn thay vì tạo rác
+                return Ok(existing);
             }
 
             var newSkill = new KyNang
             {
                 TenKyNang = cleanName,
-                TrangThai = request.TrangThai ?? true // Mặc định Admin tạo là true
+                TrangThai = request.TrangThai ?? true
             };
 
             _context.KyNangs.Add(newSkill);
@@ -144,7 +190,6 @@ namespace TKVL.Controllers
                 var targetSkill = await _context.KyNangs.FindAsync(dto.TargetId);
                 if (targetSkill == null) return NotFound(new { message = "Kỹ năng đích không tồn tại!" });
 
-                // Lấy tất cả các kỹ năng cần gộp (loại trừ ID đích)
                 var sourceIds = dto.SourceIds.Where(id => id != dto.TargetId).ToList();
                 var sourceSkills = await _context.KyNangs
                     .Include(k => k.MaViTris)
@@ -153,7 +198,6 @@ namespace TKVL.Controllers
 
                 foreach (var source in sourceSkills)
                 {
-                    // Chuyển toàn bộ liên kết vị trí tuyển dụng sang Kỹ năng đích
                     foreach (var viTri in source.MaViTris.ToList())
                     {
                         if (!targetSkill.MaViTris.Contains(viTri))
@@ -164,7 +208,7 @@ namespace TKVL.Controllers
                     _context.KyNangs.Remove(source);
                 }
 
-                targetSkill.TrangThai = true; // Tự động duyệt kỹ năng đích sau khi gộp
+                targetSkill.TrangThai = true;
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
@@ -176,6 +220,7 @@ namespace TKVL.Controllers
                 return StatusCode(500, new { message = "Lỗi khi thực hiện gộp kỹ năng!", error = ex.Message });
             }
         }
+
         // 8. TÍNH NĂNG XÓA HÀNG LOẠT (DỌN RÁC)
         [HttpPost("bulk-delete")]
         public async Task<IActionResult> BulkDelete([FromBody] List<int> ids)
@@ -195,7 +240,6 @@ namespace TKVL.Controllers
 
                 foreach (var skill in skills)
                 {
-                    // Tự động gỡ các liên kết vị trí tuyển dụng trước khi xóa
                     skill.MaViTris.Clear();
                     _context.KyNangs.Remove(skill);
                 }
@@ -210,6 +254,28 @@ namespace TKVL.Controllers
                 await transaction.RollbackAsync();
                 return StatusCode(500, new { message = "Lỗi khi xóa hàng loạt kỹ năng!", error = ex.Message });
             }
+        }
+
+        // 9. TÍNH NĂNG DUYỆT HÀNG LOẠT (BULK APPROVE)
+        [HttpPost("bulk-approve")]
+        public async Task<IActionResult> BulkApprove([FromBody] List<int> ids)
+        {
+            if (ids == null || !ids.Any())
+            {
+                return BadRequest(new { message = "Danh sách kỹ năng cần duyệt trống!" });
+            }
+
+            var skills = await _context.KyNangs
+                .Where(k => ids.Contains(k.MaKyNang))
+                .ToListAsync();
+
+            foreach (var skill in skills)
+            {
+                skill.TrangThai = true;
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, message = $"Đã duyệt thành công {skills.Count} kỹ năng!" });
         }
     }
 
