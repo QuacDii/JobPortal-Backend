@@ -6,7 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using TKVL.Models;
-using TKVL.Services; 
+using TKVL.Services;
 
 namespace TKVL.Services
 {
@@ -32,9 +32,6 @@ namespace TKVL.Services
                 }
 
                 var delayTime = nextRunTime - now;
-
-                // TEST
-                // delayTime = TimeSpan.FromMinutes(1); 
 
                 Console.WriteLine($"[JOB ALERT] Đang đếm ngược để gửi mail tự động sau: {delayTime.TotalHours:F2} giờ nữa.");
 
@@ -68,18 +65,18 @@ namespace TKVL.Services
 
             foreach (var user in activeUsers)
             {
-                // 2. Lấy danh sách ngành nghề user có đăng ký nhận thông báo
+                // 2. Lấy danh sách ngành nghề con user có đăng ký nhận thông báo (🌟 Đã sửa: MaNganh -> MaNganhCon)
                 var userAlertIndustries = await _context.JobAlerts
                     .Where(a => a.MaUser == user.MaUser && a.TrangThai == true)
-                    .Select(a => a.MaNganh)
+                    .Select(a => a.MaNganhCon)
                     .ToListAsync();
 
-                // 2b. TỰ ĐỘNG NHẬN DIỆN ngành nghề user ĐÃ TỪNG ỨNG TUYỂN (từ bảng DonUngTuyen)
+                // 2b. TỰ ĐỘNG NHẬN DIỆN ngành nghề con user ĐÃ TỪNG ỨNG TUYỂN (từ bảng DonUngTuyen) (🌟 Đã sửa: vt.MaNganh -> vt.MaNganhCon)
                 var appliedIndustries = await (from don in _context.DonUngTuyens
                                                join cv in _context.Cvs on don.MaCv equals cv.MaCv
                                                join vt in _context.ChiTietViTris on don.MaViTri equals vt.MaViTri
                                                where cv.MaUser == user.MaUser
-                                               select vt.MaNganh).Distinct().ToListAsync();
+                                               select vt.MaNganhCon).Distinct().ToListAsync();
 
                 // 2c. Gộp cả 2 danh sách lại và loại bỏ trùng lặp
                 var targetIndustries = userAlertIndustries
@@ -92,11 +89,11 @@ namespace TKVL.Services
                     continue; // Bỏ qua nếu user không cài đặt thông báo VÀ cũng chưa từng ứng tuyển Job nào
                 }
 
-                // 3. Tìm 5 công việc phù hợp nhất dựa trên danh sách ngành gộp 
+                // 3. Tìm 5 công việc phù hợp nhất dựa trên danh sách ngành gộp (🌟 Đã sửa: vt.MaNganh -> vt.MaNganhCon)
                 var matchingJobs = await (from vt in _context.ChiTietViTris
                                           join tin in _context.TinTuyenDungs on vt.MaTin equals tin.MaTin
                                           join ct in _context.CongTies on tin.MaCongTy equals ct.MaCongTy
-                                          where targetIndustries.Contains(vt.MaNganh) 
+                                          where targetIndustries.Contains(vt.MaNganhCon)
                                              && tin.TrangThai == 1
                                              && tin.NgayHetHan >= DateTime.Now
                                           orderby tin.NgayHetHan descending
@@ -108,6 +105,7 @@ namespace TKVL.Services
                                               ct.TenCongTy,
                                               ct.Logo
                                           }).Take(5).ToListAsync();
+
                 // 4. Nếu có việc làm -> Gửi email
                 if (matchingJobs.Any())
                 {

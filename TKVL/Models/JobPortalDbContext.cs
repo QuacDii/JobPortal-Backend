@@ -20,7 +20,6 @@ public partial class JobPortalDbContext : DbContext
 
     public virtual DbSet<PhanLoaiMau> PhanLoaiMaus { get; set; }
 
-
     public virtual DbSet<ChiTietViTri> ChiTietViTris { get; set; }
 
     public virtual DbSet<LichSuMoKhoaCV> LichSuMoKhoaCvs { get; set; }
@@ -39,7 +38,9 @@ public partial class JobPortalDbContext : DbContext
 
     public virtual DbSet<KyNang> KyNangs { get; set; }
 
-    public virtual DbSet<NganhNghe> NganhNghes { get; set; }
+    public DbSet<NganhNgheCha> NganhNgheChas { get; set; }
+
+    public DbSet<NganhNgheCon> NganhNgheCons { get; set; }
 
     public virtual DbSet<PhuongXa> PhuongXas { get; set; }
 
@@ -58,6 +59,7 @@ public partial class JobPortalDbContext : DbContext
     public virtual DbSet<UserDacQuyen> UserDacQuyens { get; set; }
     public virtual DbSet<UngVienDaLuu> UngVienDaLuus { get; set; }
     public virtual DbSet<LichSuXemTin> LichSuXemTins { get; set; }
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
     }
@@ -74,7 +76,10 @@ public partial class JobPortalDbContext : DbContext
             entity.Property(e => e.Luong)
                 .HasMaxLength(50)
                 .HasColumnName("luong");
-            entity.Property(e => e.MaNganh).HasColumnName("maNganh");
+
+            // 🌟 Đã sửa: MaNganh -> MaNganhCon
+            entity.Property(e => e.MaNganhCon).HasColumnName("maNganhCon");
+
             entity.Property(e => e.MaPhuong).HasColumnName("maPhuong");
             entity.Property(e => e.MaTin).HasColumnName("maTin");
             entity.Property(e => e.MoTaCongViec).HasColumnName("moTaCongViec");
@@ -87,10 +92,19 @@ public partial class JobPortalDbContext : DbContext
                 .HasColumnName("tenViTri");
             entity.Property(e => e.YeuCauUngVien).HasColumnName("yeuCauUngVien");
 
-            entity.HasOne(d => d.MaNganhNavigation).WithMany(p => p.ChiTietViTris)
-                .HasForeignKey(d => d.MaNganh)
+            // 🌟 Bổ sung ánh xạ KinhNghiem và CapBac
+            entity.Property(e => e.KinhNghiem)
+                .HasMaxLength(100)
+                .HasColumnName("kinhNghiem");
+            entity.Property(e => e.CapBac)
+                .HasMaxLength(100)
+                .HasColumnName("capBac");
+
+            // 🌟 Đã sửa: Liên kết FK tới NganhNgheCon
+            entity.HasOne(d => d.MaNganhConNavigation).WithMany(p => p.ChiTietViTris)
+                .HasForeignKey(d => d.MaNganhCon)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ChiTietViTri_NganhNghe");
+                .HasConstraintName("FK_ChiTietViTri_NganhNgheCon");
 
             entity.HasOne(d => d.MaPhuongNavigation).WithMany(p => p.ChiTietViTris)
                 .HasForeignKey(d => d.MaPhuong)
@@ -176,6 +190,10 @@ public partial class JobPortalDbContext : DbContext
               .HasDefaultValue(false);
             entity.Property(e => e.IsPublic).HasColumnName("isPublic");
             entity.Property(e => e.MaUser).HasColumnName("maUser");
+
+            // 🌟 Đã sửa: MaNganh -> MaNganhCon
+            entity.Property(e => e.MaNganhCon).HasColumnName("maNganhCon");
+
             entity.Property(e => e.TieuDe)
                 .HasMaxLength(100)
                 .HasColumnName("tieuDe");
@@ -183,9 +201,11 @@ public partial class JobPortalDbContext : DbContext
             entity.HasOne(d => d.MaUserNavigation).WithMany(p => p.Cvs)
                 .HasForeignKey(d => d.MaUser)
                 .HasConstraintName("FK_CV_User");
-            entity.HasOne(d => d.NganhNghe)
+
+            // 🌟 Đã sửa: NganhNghe -> NganhNgheCon
+            entity.HasOne(d => d.NganhNgheCon)
               .WithMany()
-              .HasForeignKey(d => d.MaNganh)
+              .HasForeignKey(d => d.MaNganhCon)
               .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -289,26 +309,35 @@ public partial class JobPortalDbContext : DbContext
                 .HasColumnName("trangThai");
         });
 
-        modelBuilder.Entity<NganhNghe>(entity =>
+        // 🌟 Đã sửa: Thay thế NganhNghe cũ bằng NganhNgheCha và NganhNgheCon
+        modelBuilder.Entity<NganhNgheCha>(entity =>
         {
-            entity.HasKey(e => e.MaNganh).HasName("PK__NganhNgh__4E0C021750B7BE5B");
+            entity.HasKey(e => e.MaNganhCha).HasName("PK_NganhNgheCha");
+            entity.ToTable("NganhNgheCha");
 
-            entity.ToTable("NganhNghe");
-
-            entity.Property(e => e.MaNganh).HasColumnName("maNganh");
-            entity.Property(e => e.TenNganh)
-                .HasMaxLength(100)
-                .HasColumnName("tenNganh");
-            entity.Property(e => e.TrangThai)
-                .HasDefaultValue(true)
-                .HasColumnName("trangThai");
+            entity.Property(e => e.MaNganhCha).HasColumnName("maNganhCha");
+            entity.Property(e => e.TenNganhCha)
+                .HasMaxLength(150)
+                .HasColumnName("tenNganhCha");
         });
 
-        modelBuilder.Entity<NganhNghe>()
-        .HasOne(n => n.NganhCha)
-        .WithMany(n => n.NganhCon)
-        .HasForeignKey(n => n.MaNganhCha)
-        .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<NganhNgheCon>(entity =>
+        {
+            entity.HasKey(e => e.MaNganhCon).HasName("PK_NganhNgheCon");
+            entity.ToTable("NganhNgheCon");
+
+            entity.Property(e => e.MaNganhCon).HasColumnName("maNganhCon");
+            entity.Property(e => e.TenNganhCon)
+                .HasMaxLength(150)
+                .HasColumnName("tenNganhCon");
+            entity.Property(e => e.MaNganhCha).HasColumnName("maNganhCha");
+
+            entity.HasOne(d => d.NganhNgheChaNavigation)
+                .WithMany(p => p.NganhNgheCons)
+                .HasForeignKey(d => d.MaNganhCha)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_NganhNgheCon_NganhNgheCha");
+        });
 
         modelBuilder.Entity<PhuongXa>(entity =>
         {
@@ -463,18 +492,18 @@ public partial class JobPortalDbContext : DbContext
             entity.HasOne(d => d.MaUserNavigation)
                   .WithMany()
                   .HasForeignKey(d => d.MaUser)
-                  .OnDelete(DeleteBehavior.Restrict); 
+                  .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PhanLoaiMau>(entity =>
         {
-            entity.HasKey(e => new { e.MaMau, e.MaDanhMuc }); 
+            entity.HasKey(e => new { e.MaMau, e.MaDanhMuc });
 
             entity.HasOne(d => d.MauCVNavigation)
                 .WithMany(p => p.PhanLoaiMaus)
                 .HasForeignKey(d => d.MaMau)
                 .HasConstraintName("FK_PhanLoaiMau_MauCV")
-                .OnDelete(DeleteBehavior.Cascade); 
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(d => d.DanhMucMauNavigation)
                 .WithMany(p => p.PhanLoaiMaus)

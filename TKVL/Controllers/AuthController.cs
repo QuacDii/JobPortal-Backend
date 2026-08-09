@@ -108,45 +108,31 @@ namespace TKVL.Controllers
         public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpDto dto)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
-            if (user == null) return NotFound(new { success = false, message = "Tài khoản không tồn tại!" });
+            if (user == null)
+                return NotFound(new { success = false, message = "Tài khoản không tồn tại!" });
 
-            if (user.OtpCode != dto.OtpCode) return BadRequest(new { success = false, message = "Mã OTP không chính xác!" });
-            if (user.OtpExpiry == null || user.OtpExpiry < DateTime.Now) return BadRequest(new { success = false, message = "Mã OTP đã hết hạn!" });
+            if (user.OtpCode != dto.OtpCode || user.OtpExpiry < DateTime.Now)
+                return BadRequest(new { success = false, message = "Mã OTP không chính xác hoặc đã hết hạn!" });
 
-            // 1. Cập nhật DB
+            // CHUYỂN GIAO QUYỀN SỞ HỮU EMAIL NẾU EMAIL NÀY ĐÃ TỒN TẠI Ở TÀI KHOẢN KHÁC
+            var otherOldUsers = await _context.Users
+                .Where(u => u.Email == dto.Email && u.MaUser != user.MaUser)
+                .ToListAsync();
+
+            foreach (var oldUser in otherOldUsers)
+            {
+                // Hủy xác thực và đổi email cũ của tài khoản bị trùng để giải phóng Email A
+                oldUser.IsEmailVerified = false;
+                oldUser.Email = $"unlinked_{oldUser.MaUser}_{DateTime.Now.Ticks}@jobsnow.vn";
+            }
+
+            // Xác nhận chính chủ cho người vừa nhập OTP thành công
             user.IsEmailVerified = true;
             user.OtpCode = null;
             user.OtpExpiry = null;
+
             await _context.SaveChangesAsync();
-
-            // 2. 🌟 TẠO TOKEN MỚI CHỨA CỜ isEmailVerified = true
-            bool isVip = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value > DateTime.UtcNow;
-            var claims = new[]
-            {
-        new Claim(ClaimTypes.NameIdentifier, user.MaUser.ToString()),
-        new Claim(ClaimTypes.Email, user.Email),
-        new Claim(ClaimTypes.Role, user.VaiTro.ToString()),
-        new Claim("HoTen", user.HoTen ?? ""),
-        new Claim("isVip", isVip.ToString().ToLower()),
-        new Claim("isEmailVerified", "true") // Đã xác thực
-    };
-
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddMinutes(Convert.ToDouble(_config["Jwt:DurationInMinutes"])),
-                Issuer = _config["Jwt:Issuer"],
-                Audience = _config["Jwt:Audience"],
-                SigningCredentials = creds
-            };
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            string newToken = tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
-
-            // 3. Trả về token mới cho Frontend
-            return Ok(new { success = true, token = newToken, message = "Xác thực Email thành công!" });
+            return Ok(new { success = true, message = "Xác thực Email thành công!" });
         }
 
         // ==============================================================

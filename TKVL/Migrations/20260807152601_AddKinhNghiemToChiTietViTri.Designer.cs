@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TKVL.Models;
 
@@ -11,9 +12,11 @@ using TKVL.Models;
 namespace TKVL.Migrations
 {
     [DbContext(typeof(JobPortalDbContext))]
-    partial class JobPortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807152601_AddKinhNghiemToChiTietViTri")]
+    partial class AddKinhNghiemToChiTietViTri
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -119,14 +122,11 @@ namespace TKVL.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaViTri"));
 
                     b.Property<string>("CapBac")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)")
-                        .HasColumnName("capBac");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("KinhNghiem")
                         .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)")
-                        .HasColumnName("kinhNghiem");
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Luong")
                         .IsRequired()
@@ -134,9 +134,9 @@ namespace TKVL.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("luong");
 
-                    b.Property<int>("MaNganhCon")
+                    b.Property<int>("MaNganh")
                         .HasColumnType("int")
-                        .HasColumnName("maNganhCon");
+                        .HasColumnName("maNganh");
 
                     b.Property<int>("MaPhuong")
                         .HasColumnType("int")
@@ -181,7 +181,7 @@ namespace TKVL.Migrations
                     b.HasKey("MaViTri")
                         .HasName("PK__ChiTietV__1D9EB9AFB5B463F0");
 
-                    b.HasIndex("MaNganhCon");
+                    b.HasIndex("MaNganh");
 
                     b.HasIndex("MaPhuong");
 
@@ -316,9 +316,8 @@ namespace TKVL.Migrations
                     b.Property<int?>("MaMau")
                         .HasColumnType("int");
 
-                    b.Property<int?>("MaNganhCon")
-                        .HasColumnType("int")
-                        .HasColumnName("maNganhCon");
+                    b.Property<int?>("MaNganh")
+                        .HasColumnType("int");
 
                     b.Property<int>("MaUser")
                         .HasColumnType("int")
@@ -343,7 +342,7 @@ namespace TKVL.Migrations
 
                     b.HasIndex("MaMau");
 
-                    b.HasIndex("MaNganhCon");
+                    b.HasIndex("MaNganh");
 
                     b.HasIndex("MaUser");
 
@@ -577,7 +576,10 @@ namespace TKVL.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaAlert"));
 
-                    b.Property<int>("MaNganhCon")
+                    b.Property<int>("MaNganh")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MaNganhNavigationMaNganh")
                         .HasColumnType("int");
 
                     b.Property<int>("MaUser")
@@ -591,7 +593,7 @@ namespace TKVL.Migrations
 
                     b.HasKey("MaAlert");
 
-                    b.HasIndex("MaNganhCon");
+                    b.HasIndex("MaNganhNavigationMaNganh");
 
                     b.HasIndex("MaUser");
 
@@ -728,52 +730,36 @@ namespace TKVL.Migrations
                     b.ToTable("MauCVs");
                 });
 
-            modelBuilder.Entity("TKVL.Models.NganhNgheCha", b =>
+            modelBuilder.Entity("TKVL.Models.NganhNghe", b =>
                 {
-                    b.Property<int>("MaNganhCha")
+                    b.Property<int>("MaNganh")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
-                        .HasColumnName("maNganhCha");
+                        .HasColumnName("maNganh");
 
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaNganhCha"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaNganh"));
 
-                    b.Property<string>("TenNganhCha")
+                    b.Property<int?>("MaNganhCha")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TenNganh")
                         .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)")
-                        .HasColumnName("tenNganhCha");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("tenNganh");
 
-                    b.HasKey("MaNganhCha")
-                        .HasName("PK_NganhNgheCha");
-
-                    b.ToTable("NganhNgheCha", (string)null);
-                });
-
-            modelBuilder.Entity("TKVL.Models.NganhNgheCon", b =>
-                {
-                    b.Property<int>("MaNganhCon")
+                    b.Property<bool>("TrangThai")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasColumnName("maNganhCon");
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("trangThai");
 
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MaNganhCon"));
-
-                    b.Property<int>("MaNganhCha")
-                        .HasColumnType("int")
-                        .HasColumnName("maNganhCha");
-
-                    b.Property<string>("TenNganhCon")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)")
-                        .HasColumnName("tenNganhCon");
-
-                    b.HasKey("MaNganhCon")
-                        .HasName("PK_NganhNgheCon");
+                    b.HasKey("MaNganh")
+                        .HasName("PK__NganhNgh__4E0C021750B7BE5B");
 
                     b.HasIndex("MaNganhCha");
 
-                    b.ToTable("NganhNgheCon", (string)null);
+                    b.ToTable("NganhNghe", (string)null);
                 });
 
             modelBuilder.Entity("TKVL.Models.PhanLoaiMau", b =>
@@ -1121,11 +1107,11 @@ namespace TKVL.Migrations
 
             modelBuilder.Entity("TKVL.Models.ChiTietViTri", b =>
                 {
-                    b.HasOne("TKVL.Models.NganhNgheCon", "MaNganhConNavigation")
+                    b.HasOne("TKVL.Models.NganhNghe", "MaNganhNavigation")
                         .WithMany("ChiTietViTris")
-                        .HasForeignKey("MaNganhCon")
+                        .HasForeignKey("MaNganh")
                         .IsRequired()
-                        .HasConstraintName("FK_ChiTietViTri_NganhNgheCon");
+                        .HasConstraintName("FK_ChiTietViTri_NganhNghe");
 
                     b.HasOne("TKVL.Models.PhuongXa", "MaPhuongNavigation")
                         .WithMany("ChiTietViTris")
@@ -1140,7 +1126,7 @@ namespace TKVL.Migrations
                         .IsRequired()
                         .HasConstraintName("FK_ChiTietViTri_TinTuyenDung");
 
-                    b.Navigation("MaNganhConNavigation");
+                    b.Navigation("MaNganhNavigation");
 
                     b.Navigation("MaPhuongNavigation");
 
@@ -1167,9 +1153,9 @@ namespace TKVL.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("FK_Cv_MauCV");
 
-                    b.HasOne("TKVL.Models.NganhNgheCon", "NganhNgheCon")
+                    b.HasOne("TKVL.Models.NganhNghe", "NganhNghe")
                         .WithMany()
-                        .HasForeignKey("MaNganhCon")
+                        .HasForeignKey("MaNganh")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("TKVL.Models.User", "MaUserNavigation")
@@ -1183,7 +1169,7 @@ namespace TKVL.Migrations
 
                     b.Navigation("MaUserNavigation");
 
-                    b.Navigation("NganhNgheCon");
+                    b.Navigation("NganhNghe");
                 });
 
             modelBuilder.Entity("TKVL.Models.DonUngTuyen", b =>
@@ -1245,9 +1231,9 @@ namespace TKVL.Migrations
 
             modelBuilder.Entity("TKVL.Models.JobAlert", b =>
                 {
-                    b.HasOne("TKVL.Models.NganhNgheCon", "MaNganhConNavigation")
+                    b.HasOne("TKVL.Models.NganhNghe", "MaNganhNavigation")
                         .WithMany()
-                        .HasForeignKey("MaNganhCon")
+                        .HasForeignKey("MaNganhNavigationMaNganh")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -1257,7 +1243,7 @@ namespace TKVL.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("MaNganhConNavigation");
+                    b.Navigation("MaNganhNavigation");
 
                     b.Navigation("MaUserNavigation");
                 });
@@ -1293,16 +1279,14 @@ namespace TKVL.Migrations
                     b.Navigation("MaTinNavigation");
                 });
 
-            modelBuilder.Entity("TKVL.Models.NganhNgheCon", b =>
+            modelBuilder.Entity("TKVL.Models.NganhNghe", b =>
                 {
-                    b.HasOne("TKVL.Models.NganhNgheCha", "NganhNgheChaNavigation")
-                        .WithMany("NganhNgheCons")
+                    b.HasOne("TKVL.Models.NganhNghe", "NganhCha")
+                        .WithMany("NganhCon")
                         .HasForeignKey("MaNganhCha")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_NganhNgheCon_NganhNgheCha");
+                        .OnDelete(DeleteBehavior.Restrict);
 
-                    b.Navigation("NganhNgheChaNavigation");
+                    b.Navigation("NganhCha");
                 });
 
             modelBuilder.Entity("TKVL.Models.PhanLoaiMau", b =>
@@ -1479,14 +1463,11 @@ namespace TKVL.Migrations
                     b.Navigation("PhanLoaiMaus");
                 });
 
-            modelBuilder.Entity("TKVL.Models.NganhNgheCha", b =>
-                {
-                    b.Navigation("NganhNgheCons");
-                });
-
-            modelBuilder.Entity("TKVL.Models.NganhNgheCon", b =>
+            modelBuilder.Entity("TKVL.Models.NganhNghe", b =>
                 {
                     b.Navigation("ChiTietViTris");
+
+                    b.Navigation("NganhCon");
                 });
 
             modelBuilder.Entity("TKVL.Models.PhuongXa", b =>

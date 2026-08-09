@@ -22,20 +22,45 @@ namespace TKVL.Controllers
             _cloudinaryService = cloudinaryService;
         }
 
-        // GET: api/MauCv/categories
-        [HttpGet("categories")]
-        public async Task<IActionResult> GetCategories()
+        [HttpGet("menu-data")]
+        public async Task<IActionResult> GetMenuData()
         {
-            var categories = await _context.DanhMucMaus
-                .Select(c => new { c.MaDanhMuc, c.TenDanhMuc })
-                .ToListAsync();
+            try
+            {
+                // Lấy danh sách Style
+                var styles = await _context.DanhMucMaus
+                    .Select(d => new { id = d.MaDanhMuc, name = d.TenDanhMuc })
+                    .ToListAsync();
 
-            return Ok(categories);
+                // Lấy Top Ngành nghề cha phổ biến dựa vào đếm số công việc thuộc các ngành nghề con
+                var popularIndustries = await _context.NganhNgheChas
+                    .Select(n => new {
+                        id = n.MaNganhCha,
+                        name = n.TenNganhCha,
+                        jobCount = _context.ChiTietViTris.Count(v => _context.NganhNgheCons
+                            .Where(c => c.MaNganhCha == n.MaNganhCha)
+                            .Select(c => c.MaNganhCon)
+                            .Contains(v.MaNganhCon))
+                    })
+                    .OrderByDescending(n => n.jobCount)
+                    .Take(5)
+                    .ToListAsync();
+
+                return Ok(new { success = true, styles, popularIndustries });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi lấy dữ liệu menu CV", error = ex.Message });
+            }
         }
 
-        // GET: api/MauCv
+        // 2. API LỌC MẪU CV THEO MÃ NGÀNH NGHỀ CHA
         [HttpGet]
-        public async Task<IActionResult> GetDanhSachMauCv([FromQuery] string? ngonNgu = null, [FromQuery] bool? activeOnly = null)
+        public async Task<IActionResult> GetDanhSachMauCv(
+            [FromQuery] string? ngonNgu = null,
+            [FromQuery] bool? activeOnly = null,
+            [FromQuery] int? categoryId = null,
+            [FromQuery] int? industryId = null) 
         {
             var query = _context.MauCVs.AsQueryable();
 
@@ -47,6 +72,42 @@ namespace TKVL.Controllers
             if (!string.IsNullOrEmpty(ngonNgu))
             {
                 query = query.Where(m => m.NgonNgu == ngonNgu);
+            }
+
+            if (categoryId.HasValue)
+            {
+                query = query.Where(m => m.PhanLoaiMaus.Any(p => p.MaDanhMuc == categoryId.Value));
+            }
+
+            // 🌟 Lọc mẫu CV theo Ngành nghề cha (Tìm tên ngành cha hoặc tên các ngành con thuộc ngành cha đó trong Tags)
+            if (industryId.HasValue)
+            {
+                var nganhCha = await _context.NganhNgheChas.FindAsync(industryId.Value);
+                if (nganhCha != null)
+                {
+                    // 1. Tách chuỗi tên ngành cha theo dấu '/' hoặc ',' thành danh sách từ khóa riêng lẻ
+                    var keywords = nganhCha.TenNganhCha
+                        .Split(new[] { '/', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(k => k.Trim())
+                        .Where(k => !string.IsNullOrEmpty(k))
+                        .ToList();
+
+                    // 2. Lấy thêm tên các ngành nghề con thuộc ngành cha này
+                    var tenNganhCons = await _context.NganhNgheCons
+                        .Where(c => c.MaNganhCha == industryId.Value)
+                        .Select(c => c.TenNganhCon)
+                        .ToListAsync();
+
+                    keywords.AddRange(tenNganhCons);
+                    keywords = keywords.Distinct().ToList();
+
+                    // 3. Tìm mẫu CV chứa BẤT KỲ từ khóa nào trong Tags, TenMau hoặc MoTa
+                    query = query.Where(m => keywords.Any(kw =>
+                        (m.Tags != null && m.Tags.Contains(kw)) ||
+                        (m.TenMau != null && m.TenMau.Contains(kw)) ||
+                        (m.MoTa != null && m.MoTa.Contains(kw))
+                    ));
+                }
             }
 
             var templates = await query
@@ -74,6 +135,17 @@ namespace TKVL.Controllers
                 .ToListAsync();
 
             return Ok(templates);
+        }
+
+        // GET: api/MauCv/categories
+        [HttpGet("categories")]
+        public async Task<IActionResult> GetCategories()
+        {
+            var categories = await _context.DanhMucMaus
+                .Select(c => new { c.MaDanhMuc, c.TenDanhMuc })
+                .ToListAsync();
+
+            return Ok(categories);
         }
 
         // GET: api/MauCv/5

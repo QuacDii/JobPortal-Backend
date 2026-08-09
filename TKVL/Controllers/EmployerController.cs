@@ -57,7 +57,7 @@ namespace TKVL.Controllers
                 giayPhepKinhDoanhMatSau = company.GiayPhepKinhDoanhMatSau,
                 yeuCauBoSung = company.YeuCauBoSung,
                 mauEmailInterview = company.MauEmailInterview,
-                chuKyEmail = company.ChuKyEmail, 
+                chuKyEmail = company.ChuKyEmail,
                 duLieuChoDuyetJson = company.DuLieuChoDuyetJson
             });
         }
@@ -69,7 +69,6 @@ namespace TKVL.Controllers
             var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
             bool isNew = (company == null);
 
-            // 1. VALIDATION DỮ LIỆU ĐẦU VÀO
             if (string.IsNullOrWhiteSpace(dto.TenCongTy))
                 return BadRequest(new { success = false, message = "Vui lòng nhập tên công ty!" });
 
@@ -86,7 +85,6 @@ namespace TKVL.Controllers
             if (string.IsNullOrWhiteSpace(dto.MoTa))
                 return BadRequest(new { success = false, message = "Vui lòng nhập giới thiệu về công ty!" });
 
-            // 2. KIỂM TRA TRÙNG MÃ SỐ THUẾ
             bool isMstExisted = await _context.CongTies.AnyAsync(c => c.MaSoThue == targetMst && c.MaUser != maUser);
             if (isMstExisted)
             {
@@ -97,7 +95,6 @@ namespace TKVL.Controllers
                 });
             }
 
-            // 🌟 3. UPLOAD FILE MỚI VÀ BẢO VỆ BẮT LỖI CLOUDINARY
             string? newLogoUrl = null;
             if (dto.LogoFile != null && dto.LogoFile.Length > 0)
             {
@@ -141,7 +138,6 @@ namespace TKVL.Controllers
                 }
             }
 
-            // 🌟 4. KIỂM TRA LOGO & GPKD CUỐI CÙNG
             string? finalLogo = newLogoUrl ?? company?.Logo;
             if (string.IsNullOrEmpty(finalLogo))
             {
@@ -167,7 +163,6 @@ namespace TKVL.Controllers
                 company = new CongTy { MaUser = maUser };
             }
 
-            // ✨ CẬP NHẬT CÁC THÔNG TIN PHỤ (CÓ HIỆU LỰC NGAY)
             company.Logo = finalLogo;
             company.QuyMo = dto.QuyMo?.Trim();
             company.DiaChi = dto.DiaChi;
@@ -227,9 +222,6 @@ namespace TKVL.Controllers
         // LUỒNG 2: QUẢN LÝ PHỄU ỨNG VIÊN & TIN TUYỂN DỤNG
         // ===================================================================
 
-        // ===================================================================
-        // API 1: KIỂM TRA QUYỀN SỬ DỤNG TÍNH NĂNG AI CỦA NHÀ TUYỂN DỤNG
-        // ===================================================================
         [HttpGet("check-subscription")]
         public async Task<IActionResult> CheckSubscription()
         {
@@ -237,7 +229,6 @@ namespace TKVL.Controllers
             var user = await _context.Users.FindAsync(currentEmployerId);
             if (user == null) return Unauthorized(new { isPremium = false });
 
-            // 🌟 KIỂM TRA TRỰC TIẾP TRONG BẢNG User_DacQuyen VỚI MA_CODE "NTD_AI_MATCHING"
             bool hasAiFeature = await _context.UserDacQuyens
                 .Include(ud => ud.DacQuyen)
                 .AnyAsync(ud => ud.MaUser == currentEmployerId
@@ -248,11 +239,8 @@ namespace TKVL.Controllers
             return Ok(new { isPremium = hasAiFeature });
         }
 
-        // ===================================================================
-        // API 2: LẤY DANH SÁCH ỨNG VIÊN (TRẢ VỀ MẢNG THUẦN CandidateDto[])
-        // ===================================================================
         [HttpGet("jobs/{maViTri}/candidates")]
-        [Authorize(Roles = "1")] // Chỉ dành cho Nhà tuyển dụng
+        [Authorize(Roles = "1")]
         public async Task<IActionResult> GetCandidatesByJob(int maViTri)
         {
             var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)
@@ -262,7 +250,6 @@ namespace TKVL.Controllers
             if (userIdClaim == null) return Unauthorized(new { message = "Vui lòng đăng nhập!" });
             int maUser = int.Parse(userIdClaim.Value);
 
-            // 1. Kiểm tra vị trí tuyển dụng có thuộc về công ty của NTD này không
             var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
             if (company == null)
                 return BadRequest(new { message = "Không tìm thấy thông tin công ty." });
@@ -273,11 +260,10 @@ namespace TKVL.Controllers
             if (!jobExists)
                 return NotFound(new { message = "Không tìm thấy bài tuyển dụng hoặc bạn không có quyền truy cập." });
 
-            // 2. Query danh sách đơn ứng tuyển & Include ChiTietPhanTichAi
             var candidates = await _context.DonUngTuyens
                 .Include(d => d.MaCvNavigation)
                     .ThenInclude(u => u.MaUserNavigation)
-                .Include(d => d.ChiTietPhanTichAi) // Join bảng kết quả AI
+                .Include(d => d.ChiTietPhanTichAi)
                 .Where(d => d.MaViTri == maViTri)
                 .OrderByDescending(d => d.NgayNop)
                 .Select(d => new CandidateFunnelDto
@@ -290,10 +276,8 @@ namespace TKVL.Controllers
                     TrangThai = d.TrangThai,
                     CvUrl = d.MaCvNavigation.DuLieuCv,
 
-                    // Kiểm tra xem đơn này đã được AI chấm điểm chưa
                     IsPendingAi = d.ChiTietPhanTichAi == null,
 
-                    // 🌟 ÉP KIỂU (double) ĐỂ FIX LỖI Math.Round (CS0121)
                     DiemMatchingTong = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemMatchingTong) : 0,
                     DiemKyNang = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKyNang) : 0,
                     DiemKinhNghiem = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKinhNghiem) : 0,
@@ -346,7 +330,6 @@ namespace TKVL.Controllers
                 {
                     string chuDe = $"[{company.TenCongTy}] Thư mời tham gia phỏng vấn - Vị trí {tenViTri}";
 
-                    // 1. CỐ ĐỊNH: Khung layout Branding cao cấp (Master Wrapper Layout) luôn luôn sử dụng để bọc ngoài thư
                     string masterLayout = @"<div style='max-width: 620px; margin: 20px auto; font-family: ""Segoe UI"", Arial, sans-serif; color: #333333; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.06);'>
                         <div style='background-color: #1e3a8a; padding: 26px; text-align: center;'>
                             <h2 style='color: #ffffff; margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.5px;'>THƯ MỜI PHỎNG VẤN</h2>
@@ -359,7 +342,6 @@ namespace TKVL.Controllers
                         </div>
                     </div>";
 
-                    // 2. Đọc nội dung thư từ NTD soạn, nếu trống thì dùng văn bản mẫu mặc định của hệ thống
                     string thongDiepGoc = !string.IsNullOrEmpty(company.MauEmailInterview)
                         ? company.MauEmailInterview
                         : "Chào {TenUngVien},\n\nCông ty {TenCongTy} trân trọng mời bạn tham gia phỏng vấn vị trí {TenViTri}.\n• Thời gian: {ThoiGian}\n• Địa điểm: {DiaDiem}\n\n{LinkBaiTest}\n\nTrân trọng,\n{ChuKyEmail}";
@@ -372,12 +354,10 @@ namespace TKVL.Controllers
                         testLinkHtml = $"<a href='{request.LinkBaiTest}' target='_blank' style='background-color: #10b981; color: #ffffff; padding: 6px 14px; text-decoration: none; display: inline-block; font-size: 13px; font-weight: bold; border-radius: 4px; margin: 0 4px; box-shadow: 0 2px 4px rgba(16,185,129,0.15);'>BẮT ĐẦU LÀM BÀI TEST</a>";
                     }
 
-                    // 4. Chuẩn hóa khối chữ ký doanh nghiệp
                     string chuKyHtml = !string.IsNullOrEmpty(company.ChuKyEmail)
                         ? $"<div style='margin-top: 20px; padding-top: 12px; border-top: 1px dashed #cbd5e1; color: #475569; font-size: 13px;'>{company.ChuKyEmail.Replace("\n", "<br/>")}</div>"
                         : "";
 
-                    // 5. Tiến hành quét trộn dữ liệu động vào nội dung thư
                     string bodyText = thongDiepHtml
                         .Replace("{TenUngVien}", tenUngVien)
                         .Replace("{TenViTri}", tenViTri)
@@ -385,8 +365,6 @@ namespace TKVL.Controllers
                         .Replace("{DiaDiem}", request.DiaDiem ?? "Sẽ thông báo sau")
                         .Replace("{TenCongTy}", company.TenCongTy);
 
-                    // 6. Cơ chế phòng vệ vị trí đặt từ khóa của Nhà tuyển dụng
-                    // Nếu trong văn bản có ghi sẵn từ khóa {LinkBaiTest} -> Đổ nút bấm vào đúng chỗ đó
                     if (bodyText.Contains("{LinkBaiTest}"))
                     {
                         bodyText = bodyText.Replace("{LinkBaiTest}", testLinkHtml);
@@ -431,7 +409,6 @@ namespace TKVL.Controllers
                 return Ok(new { status = "PENDING_APPROVAL", message = "Hồ sơ doanh nghiệp đang chờ duyệt. Vui lòng quay lại sau." });
             }
 
-            // A. TỰ ĐỘNG GỠ TIN HẾT HẠN
             var expiredJobs = await _context.TinTuyenDungs
                 .Where(t => t.MaCongTy == company.MaCongTy && t.TrangThai == 1 && t.NgayHetHan < DateTime.Now)
                 .ToListAsync();
@@ -445,10 +422,10 @@ namespace TKVL.Controllers
                 await _context.SaveChangesAsync();
             }
 
-            // B. NẠP DỮ LIỆU TỪ SQL VỀ BỘ NHỚ (Dùng OrderByDescending theo MaTin nếu chưa chạy Migration NgayDang)
+            // 🌟 Sửa đổi: ThenInclude đổi sang MaNganhConNavigation
             var rawJobs = await _context.TinTuyenDungs
                 .Include(t => t.ChiTietViTris)
-                    .ThenInclude(v => v.MaNganhNavigation)
+                    .ThenInclude(v => v.MaNganhConNavigation)
                 .Include(t => t.ChiTietViTris)
                     .ThenInclude(v => v.MaPhuongNavigation)
                         .ThenInclude(p => p.MaTpNavigation)
@@ -458,32 +435,30 @@ namespace TKVL.Controllers
                 .OrderByDescending(t => t.MaTin)
                 .ToListAsync();
 
-            // C. XỬ LÝ NỐI CHUỖI VÀ TẠO MẢNG TRÊN RAM (AN TOÀN KHÔNG BỊ LỖI SQL)
             var myJobs = rawJobs.Select(t => new
             {
                 maTin = t.MaTin,
                 maViTri = t.ChiTietViTris.Select(v => (int?)v.MaViTri).FirstOrDefault() ?? t.MaTin,
                 tieuDe = t.TieuDeChienDich,
-                ngayTao = t.NgayDang, // Hoặc t.NgayHetHan nếu chưa migration
+                ngayTao = t.NgayDang,
                 hanNop = t.NgayHetHan,
                 trangThai = t.TrangThai,
                 isPromoted = t.IsPromoted,
                 soLuongUngVien = t.ChiTietViTris.SelectMany(v => v.DonUngTuyens ?? new List<DonUngTuyen>()).Count(),
 
-                // Ngành nghề
-                danhSachMaNganh = t.ChiTietViTris.Select(v => v.MaNganh).Distinct().ToList(),
+                // 🌟 Sửa đổi: MaNganh -> MaNganhCon
+                danhSachMaNganh = t.ChiTietViTris.Select(v => v.MaNganhCon).Distinct().ToList(),
                 danhSachNganhObj = t.ChiTietViTris
-                    .Where(v => v.MaNganhNavigation != null)
-                    .Select(v => new { id = v.MaNganh, name = v.MaNganhNavigation.TenNganh })
+                    .Where(v => v.MaNganhConNavigation != null)
+                    .Select(v => new { id = v.MaNganhCon, name = v.MaNganhConNavigation.TenNganhCon })
                     .GroupBy(x => x.id)
                     .Select(g => g.First())
                     .ToList(),
                 tenNganhNghe = string.Join(", ", t.ChiTietViTris
-                    .Where(v => v.MaNganhNavigation != null)
-                    .Select(v => v.MaNganhNavigation.TenNganh)
+                    .Where(v => v.MaNganhConNavigation != null)
+                    .Select(v => v.MaNganhConNavigation.TenNganhCon)
                     .Distinct()),
 
-                // Khu vực
                 danhSachKhuVuc = t.ChiTietViTris
                     .Where(v => v.MaPhuongNavigation != null)
                     .Select(v => v.MaPhuongNavigation.TenPhuong + (v.MaPhuongNavigation.MaTpNavigation != null ? ", " + v.MaPhuongNavigation.MaTpNavigation.TenTp : ""))
@@ -505,19 +480,17 @@ namespace TKVL.Controllers
 
             if (job == null) return NotFound(new { message = "Tin tuyển dụng không tồn tại hoặc không thuộc quyền sở hữu!" });
 
-            // Đổi trạng thái: Đang đăng (1) <-> Tạm dừng/Ẩn (2)
             if (job.TrangThai == 1)
             {
-                job.TrangThai = 2; // Tạm dừng
+                job.TrangThai = 2;
             }
             else if (job.TrangThai == 2)
             {
-                // Kiểm tra xem đã hết hạn chưa trước khi mở lại
                 if (job.NgayHetHan < DateTime.Now)
                 {
                     return BadRequest(new { success = false, message = "Tin tuyển dụng đã quá hạn! Vui lòng gia hạn ngày trước khi bật lại." });
                 }
-                job.TrangThai = 1; // Bật lại
+                job.TrangThai = 1;
             }
             else
             {
@@ -542,7 +515,6 @@ namespace TKVL.Controllers
 
             int maCongTy = company.MaCongTy;
 
-            // 1. XÁC ĐỊNH KHOẢNG THỜI GIAN
             DateTime end = endDate?.Date.AddDays(1).AddTicks(-1) ?? DateTime.Now;
             DateTime start = startDate?.Date ?? DateTime.Now.Date.AddDays(-days + 1);
             int totalDays = (end - start).Days + 1;
@@ -555,7 +527,6 @@ namespace TKVL.Controllers
             var maTinList = allCompanyJobs.Select(j => j.MaTin).ToList();
             var maViTriList = allCompanyJobs.SelectMany(j => j.ChiTietViTris).Select(v => v.MaViTri).ToList();
 
-            // 2. TÍNH CHỈ SỐ KPI TỔNG QUAN
             int tinDangDangCount = allCompanyJobs.Count(j => j.TrangThai == 1 && j.NgayHetHan >= DateTime.Now);
 
             var allApplications = await _context.DonUngTuyens
@@ -570,21 +541,18 @@ namespace TKVL.Controllers
                 ? Math.Round(((double)tongCvNopCount / tongLuotXemCount) * 100, 2)
                 : 0;
 
-            int luotXemCvConLai = 0; // Lấy từ bảng gói dịch vụ / đặc quyền người dùng nếu có
+            int luotXemCvConLai = 0;
 
-            // 3. LỌC DỮ LIỆU THEO KHOẢNG THỜI GIAN CHỌN
             var viewsLogs = await _context.LichSuXemTins
                 .Where(v => maTinList.Contains(v.MaTin) && v.ThoiGianXem >= start && v.ThoiGianXem <= end)
                 .ToListAsync();
 
             var rangeApplications = allApplications.Where(a => a.NgayNop >= start && a.NgayNop <= end).ToList();
 
-            // 4. THUẬT TOÁN GOM NHÓM THÔNG MINH CHO BIỂU ĐỒ XU HƯỚNG
             var dailyTrends = new List<DailyTrendItemDto>();
 
             if (totalDays <= 60)
             {
-                // Khoảng ngắn: Gom theo TỪNG NGÀY
                 for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
                 {
                     dailyTrends.Add(new DailyTrendItemDto
@@ -597,7 +565,6 @@ namespace TKVL.Controllers
             }
             else
             {
-                // Khoảng dài (6 tháng, 1 năm): Gom theo TỪNG THÁNG
                 DateTime curr = new DateTime(start.Year, start.Month, 1);
                 while (curr <= end.Date)
                 {
@@ -615,7 +582,6 @@ namespace TKVL.Controllers
                 }
             }
 
-            // 5. TRẠNG THÁI HỒ SƠ
             var statusDistribution = new List<StatusDistributionItemDto>
             {
                 new() { StatusName = "Chờ duyệt", Count = rangeApplications.Count(a => a.TrangThai == 0) },
@@ -625,7 +591,6 @@ namespace TKVL.Controllers
                 new() { StatusName = "Từ chối", Count = rangeApplications.Count(a => a.TrangThai == 4) }
             };
 
-            // 6. TOP TIN TUYỂN DỤNG
             var topJobs = allCompanyJobs
                 .Select(j => new TopJobItemDto
                 {
@@ -661,7 +626,6 @@ namespace TKVL.Controllers
             });
         }
 
-        // 1. API LẤY SỐ LƯỢT XEM CV + TRẠNG THÁI HẠN GÓI
         [HttpGet("cv-credits")]
         public async Task<IActionResult> GetCvCredits()
         {
@@ -670,7 +634,6 @@ namespace TKVL.Controllers
                 int currentEmployerId = GetCurrentUserId();
                 var user = await _context.Users.FindAsync(currentEmployerId);
 
-                // Kiểm tra xem gói đã hết hạn chưa
                 bool isExpired = user?.NgayHetHanGoi == null || user.NgayHetHanGoi.Value.Date < DateTime.Now.Date;
                 return Ok(new
                 {
@@ -699,7 +662,6 @@ namespace TKVL.Controllers
             {
                 int currentEmployerId = GetCurrentUserId();
 
-                // 1. Lấy thông tin Công ty để loại trừ các CV đã từng nộp vào Công ty này
                 var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentEmployerId);
                 List<int> appliedCvIds = new List<int>();
                 if (company != null)
@@ -711,14 +673,13 @@ namespace TKVL.Controllers
                         .ToListAsync();
                 }
 
-                // 2. Query cơ bản: Chỉ lấy CV Bật IsPublic và Chưa từng ứng tuyển vào Công ty
+                // 🌟 Sửa đổi: Include sang NganhNgheCon
                 var query = _context.Cvs
                     .Include(c => c.MaUserNavigation)
-                    .Include(c => c.NganhNghe)
+                    .Include(c => c.NganhNgheCon)
                     .Where(c => (c.IsPublic == true) && !appliedCvIds.Contains(c.MaCv))
                     .AsQueryable();
 
-                // 3. LỌC THEO TỪ KHÓA CHÍNH
                 if (!string.IsNullOrWhiteSpace(keyword))
                 {
                     string kw = keyword.Trim().ToLower();
@@ -729,21 +690,20 @@ namespace TKVL.Controllers
                     );
                 }
 
-                // 4. LỌC THEO NGÀNH NGHỀ
                 string? targetIndustry = (nganhNghe == "Khác" && !string.IsNullOrWhiteSpace(nganhNgheKhac))
                     ? nganhNgheKhac
                     : nganhNghe;
 
+                // 🌟 Sửa đổi: NganhNghe -> NganhNgheCon
                 if (!string.IsNullOrWhiteSpace(targetIndustry) && targetIndustry != "Khác")
                 {
                     string ind = targetIndustry.Trim().ToLower();
                     query = query.Where(c =>
-                        (c.NganhNghe != null && c.NganhNghe.TenNganh.ToLower().Contains(ind)) ||
+                        (c.NganhNgheCon != null && c.NganhNgheCon.TenNganhCon.ToLower().Contains(ind)) ||
                         (c.TieuDe != null && c.TieuDe.ToLower().Contains(ind))
                     );
                 }
 
-                // 5. LỌC THEO KỸ NĂNG
                 if (!string.IsNullOrWhiteSpace(skills))
                 {
                     string sk = skills.Trim().ToLower();
@@ -758,13 +718,11 @@ namespace TKVL.Controllers
                     .ThenByDescending(c => c.MaCv)
                     .ToListAsync();
 
-                // 6. Lấy danh sách ID các CV mà Nhà tuyển dụng này ĐÃ MỞ KHÓA
                 var unlockedCvIds = await _context.LichSuMoKhoaCvs
                     .Where(l => l.MaUser == currentEmployerId)
                     .Select(l => l.MaCv)
                     .ToListAsync();
 
-                // 🌟 7. LẤY DANH SÁCH CV ĐÃ LƯU VÀ GHI CHÚ CỦA NTD NÀY
                 var savedCandidatesMap = await _context.UngVienDaLuus
                     .Where(u => u.MaUser == currentEmployerId)
                     .ToDictionaryAsync(u => u.MaCv, u => u.GhiChuCaNhan);
@@ -799,11 +757,11 @@ namespace TKVL.Controllers
                             : (!string.IsNullOrWhiteSpace(c.TieuDe) ? c.TieuDe : "Chưa cập nhật vị trí"),
                         email = isUnlocked ? c.MaUserNavigation?.Email : "••••••••@gmail.com",
                         tieuDe = c.TieuDe ?? "Hồ sơ ứng viên",
-                        tenNganh = c.NganhNghe?.TenNganh ?? "Chưa phân loại",
+                        tenNganh = c.NganhNgheCon?.TenNganhCon ?? "Chưa phân loại", // 🌟 Sửa đổi: TenNganhCon
                         cvUrl = c.DuongDan,
                         isUnlocked = isUnlocked,
-                        isSaved = isSaved, // ✨ Flag đã lưu chưa
-                        ghiChuCaNhan = ghiChu, // ✨ Ghi chú cá nhân của NTD
+                        isSaved = isSaved,
+                        ghiChuCaNhan = ghiChu,
                         ngayCapNhat = c.NgayCapNhat?.ToString("dd/MM/yyyy") ?? "Mới cập nhật"
                     };
                 }).ToList();
@@ -817,7 +775,6 @@ namespace TKVL.Controllers
             }
         }
 
-        // 🌟 API ĐÁNH DẤU / BỎ ĐÁNH DẤU LƯU ỨNG VIÊN
         [HttpPost("toggle-save-candidate")]
         public async Task<IActionResult> ToggleSaveCandidate([FromBody] SaveCandidateDto dto)
         {
@@ -825,7 +782,6 @@ namespace TKVL.Controllers
             {
                 int currentUserId = GetCurrentUserId();
 
-                // 🌟 1. RÀNG BUỘC NGHIỆP VỤ: Kiểm tra xem NTD đã mở khóa CV này chưa
                 bool isUnlocked = await _context.LichSuMoKhoaCvs
                     .AnyAsync(l => l.MaUser == currentUserId && l.MaCv == dto.MaCv);
 
@@ -834,7 +790,6 @@ namespace TKVL.Controllers
                     return BadRequest(new { success = false, message = "Bạn phải mở khóa liên hệ CV này trước khi lưu vào danh sách ưng ý!" });
                 }
 
-                // 2. Thực hiện Toggle lưu / bỏ lưu
                 var existing = await _context.UngVienDaLuus
                     .FirstOrDefaultAsync(u => u.MaUser == currentUserId && u.MaCv == dto.MaCv);
 
@@ -864,7 +819,6 @@ namespace TKVL.Controllers
             }
         }
 
-        // API CẬP NHẬT GHI CHÚ RIÊNG CHO ỨNG VIÊN ĐÃ LƯU
         [HttpPut("update-candidate-note")]
         public async Task<IActionResult> UpdateCandidateNote([FromBody] SaveCandidateDto dto)
         {
@@ -889,8 +843,6 @@ namespace TKVL.Controllers
             }
         }
 
-
-        // 2. API MỞ KHÓA THÔNG TIN LIÊN HỆ CV (CHUẨN HÓA JSON RESPONSES)
         [HttpPost("unlock-cv/{maCv}")]
         public async Task<IActionResult> UnlockCv(int maCv)
         {
@@ -905,7 +857,6 @@ namespace TKVL.Controllers
 
                 if (!isUserValid || user.LuotXemCvConLai <= 0)
                 {
-                    // 🌟 Trả về JSON chuẩn để Frontend không bị crash
                     return BadRequest(new
                     {
                         success = false,
@@ -938,7 +889,6 @@ namespace TKVL.Controllers
         {
             int currentUserId = GetCurrentUserId();
 
-            // 1. Kiểm tra đặc quyền NTD_VIP_JOB
             bool isVipActive = await _context.UserDacQuyens
                 .Include(ud => ud.DacQuyen)
                 .AnyAsync(ud => ud.MaUser == currentUserId
@@ -951,7 +901,6 @@ namespace TKVL.Controllers
                 return BadRequest(new { success = false, message = "Tài khoản của bạn chưa đăng ký đặc quyền Đẩy tin VIP!" });
             }
 
-            // 2. Tìm tin đăng thuộc sở hữu của doanh nghiệp
             var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
             var job = await _context.TinTuyenDungs.FirstOrDefaultAsync(j => j.MaTin == maTin && j.MaCongTy == company.MaCongTy);
 
@@ -966,13 +915,12 @@ namespace TKVL.Controllers
         [HttpGet("hunt-cv/industries")]
         public async Task<IActionResult> GetDatabaseIndustries()
         {
-            var industries = await _context.NganhNghes
-                .OrderBy(n => n.MaNganh)
-                .Select(n => n.TenNganh)
+            // 🌟 Sửa đổi: Truy vấn từ bảng NganhNgheCons thay cho NganhNghes
+            var industries = await _context.NganhNgheCons
+                .OrderBy(n => n.MaNganhCon)
+                .Select(n => n.TenNganhCon)
                 .ToListAsync();
 
-            // Cơ chế phòng vệ: Đảm bảo luôn có tùy chọn "Khác" ở cuối danh sách 
-            // để kích hoạt ô nhập liệu thông minh ở giao diện Frontend
             if (!industries.Contains("Khác"))
             {
                 industries.Add("Khác");
@@ -980,10 +928,6 @@ namespace TKVL.Controllers
 
             return Ok(industries);
         }
-
-        // ===================================================================
-        // HÀM HỖ TRỢ DÙNG CHUNG
-        // ===================================================================
 
         private int GetCurrentUserId()
         {
@@ -1001,7 +945,7 @@ namespace TKVL.Controllers
                 return userId;
             }
 
-            return 0; // Trả về 0 thay vì quăng Exception để Controller xử lý HTTP 401 chuẩn
+            return 0;
         }
     }
 }

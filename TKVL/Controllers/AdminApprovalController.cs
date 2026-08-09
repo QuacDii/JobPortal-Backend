@@ -37,9 +37,6 @@ namespace TKVL.Controllers
         {
             try
             {
-                // Lấy cả 2 nhóm:
-                // 1. Hồ sơ đăng ký mới (TrangThai == false)
-                // 2. Hồ sơ đang chạy có yêu cầu cập nhật (DuLieuChoDuyetJson != null)
                 var rawCompanies = await _context.CongTies
                     .Include(c => c.MaUserNavigation)
                     .Where(c => c.TrangThai == false || (c.TrangThai == true && c.DuLieuChoDuyetJson != null))
@@ -65,7 +62,7 @@ namespace TKVL.Controllers
                         LoaiYeuCau = (c.TrangThai == true && pendingData != null) ? "UPDATE" : "NEW",
                         ThongTinChoDuyet = pendingData
                     };
-                }).OrderByDescending(x => x.LoaiYeuCau == "NEW").ToList(); // Ưu tiên xếp hồ sơ mới lên đầu
+                }).OrderByDescending(x => x.LoaiYeuCau == "NEW").ToList();
 
                 return Ok(result);
             }
@@ -110,7 +107,7 @@ namespace TKVL.Controllers
                     NguoiDaiDien = company.MaUserNavigation?.HoTen,
                     Email = company.MaUserNavigation?.Email,
                     LoaiYeuCau = (company.TrangThai == true && pendingData != null) ? "UPDATE" : "NEW",
-                    ThongTinChoDuyet = pendingData // Nếu có dữ liệu này, Frontend sẽ bật chế độ SO SÁNH (Diff)
+                    ThongTinChoDuyet = pendingData
                 });
             }
             catch (Exception ex)
@@ -137,10 +134,8 @@ namespace TKVL.Controllers
 
                 if (action == "APPROVE" || request.IsApproved == true)
                 {
-                    // 1. PHÊ DUYỆT
                     if (!string.IsNullOrEmpty(company.DuLieuChoDuyetJson))
                     {
-                        // Kịch bản A: Duyệt yêu cầu CẬP NHẬT -> Ghi đè bản nháp vào dữ liệu chính
                         var pendingData = JsonSerializer.Deserialize<CompanyPendingUpdateDto>(company.DuLieuChoDuyetJson);
                         if (pendingData != null)
                         {
@@ -149,7 +144,7 @@ namespace TKVL.Controllers
                             company.GiayPhepKinhDoanhMatTruoc = pendingData.GiayPhepKinhDoanhMatTruoc;
                             company.GiayPhepKinhDoanhMatSau = pendingData.GiayPhepKinhDoanhMatSau;
                         }
-                        company.DuLieuChoDuyetJson = null; // Xóa bản nháp sau khi đè thành công
+                        company.DuLieuChoDuyetJson = null;
                     }
 
                     company.TrangThai = true;
@@ -167,7 +162,6 @@ namespace TKVL.Controllers
                 }
                 else if (action == "REQUEST_ADDITION")
                 {
-                    // 2. YÊU CẦU BỔ SUNG
                     company.YeuCauBoSung = request.YeuCauBoSung;
                     await _context.SaveChangesAsync();
 
@@ -185,16 +179,13 @@ namespace TKVL.Controllers
                 }
                 else if (action == "REJECT")
                 {
-                    // 3. TỪ CHỐI
                     if (company.TrangThai == true && !string.IsNullOrEmpty(company.DuLieuChoDuyetJson))
                     {
-                        // Nếu là TỪ CHỐI BẢN CẬP NHẬT -> Chỉ xóa bản nháp, KHÔNG xóa công ty, giữ nguyên thông tin cũ đang chạy
                         company.DuLieuChoDuyetJson = null;
                         await _context.SaveChangesAsync();
                     }
                     else
                     {
-                        // Nếu là TỪ CHỐI HỒ SƠ MỚI -> Xóa công ty khỏi hệ thống
                         _context.CongTies.Remove(company);
                         await _context.SaveChangesAsync();
                     }
@@ -229,7 +220,7 @@ namespace TKVL.Controllers
                 var pendingJobs = await _context.TinTuyenDungs
                     .Include(t => t.MaCongTyNavigation)
                     .Include(t => t.ChiTietViTris)
-                        .ThenInclude(v => v.MaNganhNavigation)
+                        .ThenInclude(v => v.MaNganhConNavigation) // 🌟 Đã sửa: MaNganhNavigation -> MaNganhConNavigation
                     .Where(t => t.TrangThai == 0)
                     .Select(t => new
                     {
@@ -244,7 +235,7 @@ namespace TKVL.Controllers
                             v.MaViTri,
                             v.TenViTri,
                             v.Luong,
-                            TenNganh = v.MaNganhNavigation.TenNganh,
+                            TenNganh = v.MaNganhConNavigation != null ? v.MaNganhConNavigation.TenNganhCon : null, // 🌟 Đã sửa: TenNganhCon
                             v.SoLuongTuyen,
                             v.MoTaCongViec,
                             v.YeuCauUngVien,
