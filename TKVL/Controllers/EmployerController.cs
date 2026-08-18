@@ -428,12 +428,10 @@ namespace TKVL.Controllers
         {
             int maUser = GetCurrentUserId();
             var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
-
             if (company == null)
             {
                 return Ok(new { status = "NO_PROFILE", message = "Cần khởi tạo hồ sơ công ty trước khi quản lý tin đăng." });
             }
-
             if (company.TrangThai == false)
             {
                 return Ok(new { status = "PENDING_APPROVAL", message = "Hồ sơ doanh nghiệp đang chờ duyệt. Vui lòng quay lại sau." });
@@ -452,7 +450,6 @@ namespace TKVL.Controllers
                 await _context.SaveChangesAsync();
             }
 
-            // 🌟 Sửa đổi: ThenInclude đổi sang MaNganhConNavigation
             var rawJobs = await _context.TinTuyenDungs
                 .Include(t => t.ChiTietViTris)
                     .ThenInclude(v => v.MaNganhConNavigation)
@@ -475,8 +472,6 @@ namespace TKVL.Controllers
                 trangThai = t.TrangThai,
                 isPromoted = t.IsPromoted,
                 soLuongUngVien = t.ChiTietViTris.SelectMany(v => v.DonUngTuyens ?? new List<DonUngTuyen>()).Count(),
-
-                // 🌟 Sửa đổi: MaNganh -> MaNganhCon
                 danhSachMaNganh = t.ChiTietViTris.Select(v => v.MaNganhCon).Distinct().ToList(),
                 danhSachNganhObj = t.ChiTietViTris
                     .Where(v => v.MaNganhConNavigation != null)
@@ -488,11 +483,24 @@ namespace TKVL.Controllers
                     .Where(v => v.MaNganhConNavigation != null)
                     .Select(v => v.MaNganhConNavigation.TenNganhCon)
                     .Distinct()),
-
                 danhSachKhuVuc = t.ChiTietViTris
                     .Where(v => v.MaPhuongNavigation != null)
                     .Select(v => v.MaPhuongNavigation.TenPhuong + (v.MaPhuongNavigation.MaTpNavigation != null ? ", " + v.MaPhuongNavigation.MaTpNavigation.TenTp : ""))
-                    .Distinct().ToList()
+                    .Distinct().ToList(),
+
+                // 🌟 BỔ SUNG: Trả về danh sách vị trí con kèm trạng thái và lý do từ chối
+                danhSachViTri = t.ChiTietViTris.Select(v => new
+                {
+                    maViTri = v.MaViTri,
+                    tenViTri = v.TenViTri,
+                    capBac = v.CapBac,
+                    luong = v.Luong,
+                    soLuongTuyen = v.SoLuongTuyen,
+                    trangThai = v.TrangThai, // 0: Chờ duyệt | 1: Đang mở | 2: Đã đóng | 3: Bị từ chối
+                    lyDoTuChoi = v.LyDoTuChoi,
+                    ngayHetHan = v.NgayHetHan,
+                    soLuongUngVien = v.DonUngTuyens != null ? v.DonUngTuyens.Count : 0
+                }).ToList()
             }).ToList();
 
             return Ok(new { status = "SUCCESS", data = myJobs });
@@ -535,125 +543,131 @@ namespace TKVL.Controllers
 
         [HttpGet("dashboard/analytics")]
         public async Task<IActionResult> GetDashboardAnalytics(
-            [FromQuery] DateTime? startDate = null,
-            [FromQuery] DateTime? endDate = null,
-            [FromQuery] int days = 30)
+    [FromQuery] DateTime? startDate = null,
+    [FromQuery] DateTime? endDate = null,
+    [FromQuery] int days = 30)
         {
-            int currentUserId = GetCurrentUserId();
-            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
-            if (company == null) return BadRequest(new { message = "Không tìm thấy doanh nghiệp!" });
-
-            int maCongTy = company.MaCongTy;
-
-            DateTime end = endDate?.Date.AddDays(1).AddTicks(-1) ?? DateTime.Now;
-            DateTime start = startDate?.Date ?? DateTime.Now.Date.AddDays(-days + 1);
-            int totalDays = (end - start).Days + 1;
-
-            var allCompanyJobs = await _context.TinTuyenDungs
-                .Include(j => j.ChiTietViTris)
-                .Where(j => j.MaCongTy == maCongTy)
-                .ToListAsync();
-
-            var maTinList = allCompanyJobs.Select(j => j.MaTin).ToList();
-            var maViTriList = allCompanyJobs.SelectMany(j => j.ChiTietViTris).Select(v => v.MaViTri).ToList();
-
-            int tinDangDangCount = allCompanyJobs.Count(j => j.TrangThai == 1 && j.NgayHetHan >= DateTime.Now);
-
-            var allApplications = await _context.DonUngTuyens
-                .Where(a => maViTriList.Contains(a.MaViTri))
-                .ToListAsync();
-
-            int hoSoMoiCount = allApplications.Count(a => a.TrangThai == 0);
-            int tongCvNopCount = allApplications.Count;
-            int tongLuotXemCount = allCompanyJobs.Sum(j => j.LuotXem);
-
-            double tyLeChuyenDoi = tongLuotXemCount > 0
-                ? Math.Round(((double)tongCvNopCount / tongLuotXemCount) * 100, 2)
-                : 0;
-
-            int luotXemCvConLai = 0;
-
-            var viewsLogs = await _context.LichSuXemTins
-                .Where(v => maTinList.Contains(v.MaTin) && v.ThoiGianXem >= start && v.ThoiGianXem <= end)
-                .ToListAsync();
-
-            var rangeApplications = allApplications.Where(a => a.NgayNop >= start && a.NgayNop <= end).ToList();
-
-            var dailyTrends = new List<DailyTrendItemDto>();
-
-            if (totalDays <= 60)
+            try
             {
-                for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
+                int currentUserId = GetCurrentUserId();
+                var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+                if (company == null)
+                    return BadRequest(new { success = false, message = "Không tìm thấy doanh nghiệp!" });
+
+                var user = await _context.Users.FindAsync(currentUserId);
+                int maCongTy = company.MaCongTy;
+                DateTime end = endDate?.Date.AddDays(1).AddTicks(-1) ?? DateTime.Now;
+                DateTime start = startDate?.Date ?? DateTime.Now.Date.AddDays(-days + 1);
+                int totalDays = (end - start).Days + 1;
+
+                var allCompanyJobs = await _context.TinTuyenDungs
+                    .Include(j => j.ChiTietViTris)
+                    .Where(j => j.MaCongTy == maCongTy)
+                    .ToListAsync();
+
+                var maTinList = allCompanyJobs.Select(j => j.MaTin).ToList();
+                var maViTriList = allCompanyJobs.SelectMany(j => j.ChiTietViTris).Select(v => v.MaViTri).ToList();
+
+                int tinDangDangCount = allCompanyJobs.Count(j => j.TrangThai == 1 && j.NgayHetHan >= DateTime.Now);
+
+                var allApplications = await _context.DonUngTuyens
+                    .Where(a => maViTriList.Contains(a.MaViTri))
+                    .ToListAsync();
+
+                int hoSoMoiCount = allApplications.Count(a => a.TrangThai == 0);
+                int tongCvNopCount = allApplications.Count;
+                int tongLuotXemCount = allCompanyJobs.Sum(j => j.LuotXem);
+                double tyLeChuyenDoi = tongLuotXemCount > 0
+                    ? Math.Round(((double)tongCvNopCount / tongLuotXemCount) * 100, 2)
+                    : 0;
+
+                // 🌟 Lấy chính xác lượt xem CV còn lại của User
+                int luotXemCvConLai = user?.LuotXemCvConLai ?? 0;
+
+                var viewsLogs = await _context.LichSuXemTins
+                    .Where(v => maTinList.Contains(v.MaTin) && v.ThoiGianXem >= start && v.ThoiGianXem <= end)
+                    .ToListAsync();
+
+                var rangeApplications = allApplications.Where(a => a.NgayNop >= start && a.NgayNop <= end).ToList();
+
+                var dailyTrends = new List<DailyTrendItemDto>();
+                if (totalDays <= 60)
                 {
-                    dailyTrends.Add(new DailyTrendItemDto
+                    for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
                     {
-                        Date = date.ToString("dd/MM"),
-                        Views = viewsLogs.Count(v => v.ThoiGianXem.Date == date),
-                        Applications = rangeApplications.Count(a => a.NgayNop.Date == date)
-                    });
+                        dailyTrends.Add(new DailyTrendItemDto
+                        {
+                            Date = date.ToString("dd/MM"),
+                            Views = viewsLogs.Count(v => v.ThoiGianXem.Date == date),
+                            Applications = rangeApplications.Count(a => a.NgayNop.Date == date)
+                        });
+                    }
                 }
-            }
-            else
-            {
-                DateTime curr = new DateTime(start.Year, start.Month, 1);
-                while (curr <= end.Date)
+                else
                 {
-                    DateTime monthEnd = curr.AddMonths(1).AddDays(-1);
-                    if (monthEnd > end) monthEnd = end;
-
-                    dailyTrends.Add(new DailyTrendItemDto
+                    DateTime curr = new DateTime(start.Year, start.Month, 1);
+                    while (curr <= end.Date)
                     {
-                        Date = curr.ToString("MM/yyyy"),
-                        Views = viewsLogs.Count(v => v.ThoiGianXem.Date >= curr && v.ThoiGianXem.Date <= monthEnd),
-                        Applications = rangeApplications.Count(a => a.NgayNop.Date >= curr && a.NgayNop.Date <= monthEnd)
-                    });
-
-                    curr = curr.AddMonths(1);
+                        DateTime monthEnd = curr.AddMonths(1).AddDays(-1);
+                        if (monthEnd > end) monthEnd = end;
+                        dailyTrends.Add(new DailyTrendItemDto
+                        {
+                            Date = curr.ToString("MM/yyyy"),
+                            Views = viewsLogs.Count(v => v.ThoiGianXem.Date >= curr && v.ThoiGianXem.Date <= monthEnd),
+                            Applications = rangeApplications.Count(a => a.NgayNop.Date >= curr && a.NgayNop.Date <= monthEnd)
+                        });
+                        curr = curr.AddMonths(1);
+                    }
                 }
+
+                var statusDistribution = new List<StatusDistributionItemDto>
+        {
+            new() { StatusName = "Chờ duyệt", Count = rangeApplications.Count(a => a.TrangThai == 0) },
+            new() { StatusName = "Đã duyệt", Count = rangeApplications.Count(a => a.TrangThai == 1) },
+            new() { StatusName = "Hẹn phỏng vấn", Count = rangeApplications.Count(a => a.TrangThai == 2) },
+            new() { StatusName = "Trúng tuyển", Count = rangeApplications.Count(a => a.TrangThai == 3) },
+            new() { StatusName = "Từ chối", Count = rangeApplications.Count(a => a.TrangThai == 4) }
+        };
+
+                var topJobs = allCompanyJobs
+                    .Select(j => new TopJobItemDto
+                    {
+                        MaTin = j.MaTin,
+                        TieuDe = j.TieuDeChienDich,
+                        LuotXem = j.LuotXem,
+                        SoCvNop = rangeApplications.Count(a => j.ChiTietViTris.Select(v => v.MaViTri).Contains(a.MaViTri)),
+                        TrangThai = j.TrangThai,
+                        NgayDang = j.NgayDang
+                    })
+                    .OrderByDescending(j => j.SoCvNop)
+                    .ThenByDescending(j => j.LuotXem)
+                    .Take(5)
+                    .ToList();
+
+                return Ok(new
+                {
+                    success = true,
+                    summary = new
+                    {
+                        tinDangDang = tinDangDangCount,
+                        hoSoMoiChuaDuyet = hoSoMoiCount,
+                        luotXemCvConLai = luotXemCvConLai,
+                        tongLuotXemTin = tongLuotXemCount,
+                        tongCvNop = tongCvNopCount,
+                        tyLeChuyenDoi = tyLeChuyenDoi
+                    },
+                    charts = new
+                    {
+                        dailyTrends = dailyTrends,
+                        statusDistribution = statusDistribution
+                    },
+                    topJobs = topJobs
+                });
             }
-
-            var statusDistribution = new List<StatusDistributionItemDto>
+            catch (Exception ex)
             {
-                new() { StatusName = "Chờ duyệt", Count = rangeApplications.Count(a => a.TrangThai == 0) },
-                new() { StatusName = "Đã duyệt", Count = rangeApplications.Count(a => a.TrangThai == 1) },
-                new() { StatusName = "Hẹn phỏng vấn", Count = rangeApplications.Count(a => a.TrangThai == 2) },
-                new() { StatusName = "Trúng tuyển", Count = rangeApplications.Count(a => a.TrangThai == 3) },
-                new() { StatusName = "Từ chối", Count = rangeApplications.Count(a => a.TrangThai == 4) }
-            };
-
-            var topJobs = allCompanyJobs
-                .Select(j => new TopJobItemDto
-                {
-                    MaTin = j.MaTin,
-                    TieuDe = j.TieuDeChienDich,
-                    LuotXem = j.LuotXem,
-                    SoCvNop = rangeApplications.Count(a => j.ChiTietViTris.Select(v => v.MaViTri).Contains(a.MaViTri)),
-                    TrangThai = j.TrangThai,
-                    NgayDang = j.NgayDang
-                })
-                .OrderByDescending(j => j.SoCvNop)
-                .ThenByDescending(j => j.LuotXem)
-                .Take(5)
-                .ToList();
-
-            return Ok(new DashboardAnalyticsDto
-            {
-                Summary = new SummaryKpiDto
-                {
-                    TinDangDang = tinDangDangCount,
-                    HoSoMoiChuaDuyet = hoSoMoiCount,
-                    LuotXemCvConLai = luotXemCvConLai,
-                    TongLuotXemTin = tongLuotXemCount,
-                    TongCvNop = tongCvNopCount,
-                    TyLeChuyenDoi = tyLeChuyenDoi
-                },
-                Charts = new ChartsDataDto
-                {
-                    DailyTrends = dailyTrends,
-                    StatusDistribution = statusDistribution
-                },
-                TopJobs = topJobs
-            });
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
         }
 
         [HttpGet("cv-credits")]
@@ -957,6 +971,41 @@ namespace TKVL.Controllers
             }
 
             return Ok(industries);
+        }
+
+        [HttpPatch("positions/{maViTri}/toggle-status")]
+        public async Task<IActionResult> TogglePositionStatus(int maViTri)
+        {
+            int currentUserId = GetCurrentUserId();
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+            if (company == null) return BadRequest(new { message = "Không tìm thấy doanh nghiệp!" });
+
+            var position = await _context.ChiTietViTris
+                .Include(v => v.MaTinNavigation)
+                .FirstOrDefaultAsync(v => v.MaViTri == maViTri && v.MaTinNavigation.MaCongTy == company.MaCongTy);
+
+            if (position == null) return NotFound(new { message = "Không tìm thấy vị trí tuyển dụng!" });
+
+            if (position.TrangThai == 1)
+            {
+                position.TrangThai = 2; // Đóng nhận hồ sơ vị trí này
+            }
+            else if (position.TrangThai == 2)
+            {
+                if (position.NgayHetHan.HasValue && position.NgayHetHan < DateTime.Now)
+                {
+                    return BadRequest(new { success = false, message = "Vị trí này đã hết hạn tuyển dụng! Vui lòng gia hạn trước khi mở lại." });
+                }
+                position.TrangThai = 1; // Mở lại nhận hồ sơ
+            }
+            else
+            {
+                return BadRequest(new { success = false, message = "Vị trí này đang chờ duyệt hoặc đã bị từ chối, không thể bật/tắt!" });
+            }
+
+            await _context.SaveChangesAsync();
+            string statusName = position.TrangThai == 1 ? "Đang nhận hồ sơ" : "Đã đóng nhận hồ sơ";
+            return Ok(new { success = true, newStatus = position.TrangThai, message = $"Vị trí '{position.TenViTri}' chuyển sang trạng thái: {statusName}." });
         }
 
         private int GetCurrentUserId()

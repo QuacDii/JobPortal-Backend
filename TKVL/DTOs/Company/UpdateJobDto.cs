@@ -1,14 +1,15 @@
 ﻿namespace TKVL.DTOs
 {
-    public class PostJobRequestDto
+    public class UpdateJobRequestDto
     {
         public string TieuDeChienDich { get; set; } = null!;
         public DateTime NgayHetHan { get; set; }
-        public List<JobPositionDto> DanhSachViTri { get; set; } = new();
+        public List<UpdateJobPositionDto> DanhSachViTri { get; set; } = new();
     }
 
-    public class JobPositionDto
+    public class UpdateJobPositionDto
     {
+        public int? MaViTri { get; set; }
         public string TenViTri { get; set; } = null!;
         public string? CapBac { get; set; }
         public string? KinhNghiem { get; set; } // 🌟 Bổ sung KinhNghiem

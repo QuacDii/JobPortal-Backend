@@ -212,16 +212,20 @@ namespace TKVL.Controllers
         // LUỒNG 2: KIỂM DUYỆT TIN TUYỂN DỤNG
         // =================================================================
 
+        // =================================================================
+        // 1. GET: LẤY DANH SÁCH CHIẾN DỊCH CÒN VỊ TRÍ CHỜ DUYỆT
+        // =================================================================
         [HttpGet("pending-job-posts")]
         public async Task<IActionResult> GetPendingJobPosts()
         {
             try
             {
+                // 🌟 SỬA ĐIỀU KIỆN: Chỉ cần chiến dịch chờ duyệt HOẶC còn vị trí con đang chờ (TrangThai == 0)
                 var pendingJobs = await _context.TinTuyenDungs
                     .Include(t => t.MaCongTyNavigation)
                     .Include(t => t.ChiTietViTris)
-                        .ThenInclude(v => v.MaNganhConNavigation) // 🌟 Đã sửa: MaNganhNavigation -> MaNganhConNavigation
-                    .Where(t => t.TrangThai == 0)
+                        .ThenInclude(v => v.MaNganhConNavigation)
+                    .Where(t => t.TrangThai == 0 || t.ChiTietViTris.Any(v => v.TrangThai == 0))
                     .Select(t => new
                     {
                         t.MaTin,
@@ -235,16 +239,71 @@ namespace TKVL.Controllers
                             v.MaViTri,
                             v.TenViTri,
                             v.Luong,
-                            TenNganh = v.MaNganhConNavigation != null ? v.MaNganhConNavigation.TenNganhCon : null, // 🌟 Đã sửa: TenNganhCon
+                            TenNganh = v.MaNganhConNavigation != null ? v.MaNganhConNavigation.TenNganhCon : null,
                             v.SoLuongTuyen,
                             v.MoTaCongViec,
                             v.YeuCauUngVien,
-                            v.QuyenLoi
+                            v.QuyenLoi,
+                            v.TrangThai,
+                            v.LyDoTuChoi,
+                            v.NgayHetHan
                         }).ToList()
                     })
                     .OrderBy(t => t.NgayHetHan)
                     .ToListAsync();
+
                 return Ok(pendingJobs);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        // =================================================================
+        // 2. PUT: DUYỆT TOÀN BỘ CÁC VỊ TRÍ TRONG CHIẾN DỊCH
+        // =================================================================
+        [HttpPut("approve-all-positions/{maTin}")]
+        public async Task<IActionResult> ApproveAllPositions(int maTin)
+        {
+            try
+            {
+                var campaign = await _context.TinTuyenDungs
+                    .Include(t => t.ChiTietViTris)
+                    .Include(t => t.MaCongTyNavigation)
+                        .ThenInclude(c => c.MaUserNavigation)
+                    .FirstOrDefaultAsync(t => t.MaTin == maTin);
+
+                if (campaign == null)
+                    return NotFound(new { success = false, message = "Không tìm thấy chiến dịch tuyển dụng!" });
+
+                // Cập nhật tất cả các vị trí đang chờ (0) thành đã duyệt (1)
+                foreach (var pos in campaign.ChiTietViTris)
+                {
+                    if (pos.TrangThai == 0)
+                    {
+                        pos.TrangThai = 1;
+                        pos.LyDoTuChoi = null;
+                    }
+                }
+
+                campaign.TrangThai = 1; // Chiến dịch chính thức lên sóng
+                await _context.SaveChangesAsync();
+
+                // Gửi email thông báo cho NTD
+                string? employerEmail = campaign.MaCongTyNavigation?.MaUserNavigation?.Email;
+                string employerName = campaign.MaCongTyNavigation?.MaUserNavigation?.HoTen ?? "Nhà tuyển dụng";
+                if (!string.IsNullOrEmpty(employerEmail))
+                {
+                    string emailBody = $@"
+                <p>Chào <b>{employerName}</b>,</p>
+                <p>Toàn bộ các vị trí trong chiến dịch tuyển dụng <b>'{campaign.TieuDeChienDich}'</b> của bạn đã được <b>Phê duyệt thành công</b> và đang mở nhận hồ sơ trên hệ thống.</p>
+                <br/><p>Trân trọng,<br/><b>Ban quản trị JobsNow System</b></p>";
+
+                    _ = _emailService.SendEmailAsync(employerEmail, $"[JobsNow] Toàn bộ chiến dịch '{campaign.TieuDeChienDich}' đã được phê duyệt", emailBody);
+                }
+
+                return Ok(new { success = true, message = "Đã duyệt toàn bộ các vị trí trong chiến dịch!" });
             }
             catch (Exception ex)
             {
@@ -306,6 +365,60 @@ namespace TKVL.Controllers
                     success = true,
                     message = request.IsApproved ? "Đã phê duyệt tin tuyển dụng thành công!" : "Đã từ chối tin tuyển dụng!"
                 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPut("review-position")]
+        public async Task<IActionResult> ReviewPosition([FromBody] ReviewPositionDto request)
+        {
+            try
+            {
+                var position = await _context.ChiTietViTris
+                    .Include(v => v.MaTinNavigation)
+                        .ThenInclude(t => t.MaCongTyNavigation)
+                            .ThenInclude(c => c.MaUserNavigation)
+                    .FirstOrDefaultAsync(v => v.MaViTri == request.MaViTri);
+
+                if (position == null)
+                    return NotFound(new { success = false, message = "Không tìm thấy vị trí tuyển dụng!" });
+
+                position.TrangThai = (byte)(request.IsApproved ? 1 : 3); // 1: Đang mở, 3: Bị từ chối
+                position.LyDoTuChoi = request.IsApproved ? null : request.LyDoTuChoi;
+
+                // Tự động kiểm tra trạng thái toàn chiến dịch
+                var allPositions = await _context.ChiTietViTris
+                    .Where(v => v.MaTin == position.MaTin)
+                    .ToListAsync();
+
+                var campaign = position.MaTinNavigation;
+                if (allPositions.Any(v => v.TrangThai == 1))
+                {
+                    campaign.TrangThai = 1; // Chiến dịch được lên sóng nếu có ít nhất 1 vị trí được duyệt
+                }
+                else if (allPositions.All(v => v.TrangThai == 3))
+                {
+                    campaign.TrangThai = 2; // Tạm dừng/từ chối toàn bộ nếu tất cả vị trí đều bị từ chối
+                }
+
+                await _context.SaveChangesAsync();
+
+                // Gửi email thông báo cho Nhà tuyển dụng
+                string? employerEmail = campaign.MaCongTyNavigation?.MaUserNavigation?.Email;
+                string employerName = campaign.MaCongTyNavigation?.MaUserNavigation?.HoTen ?? "Nhà tuyển dụng";
+                if (!string.IsNullOrEmpty(employerEmail))
+                {
+                    string emailBody = request.IsApproved
+                        ? $"<p>Chào <b>{employerName}</b>,</p><p>Vị trí <b>'{position.TenViTri}'</b> trong chiến dịch <b>'{campaign.TieuDeChienDich}'</b> đã được <b>Phê duyệt</b> và đang mở nhận hồ sơ.</p>"
+                        : $"<p>Chào <b>{employerName}</b>,</p><p>Vị trí <b>'{position.TenViTri}'</b> trong chiến dịch <b>'{campaign.TieuDeChienDich}'</b> đã bị <b>Từ chối</b>.<br/><b>Lý do:</b> {request.LyDoTuChoi}</p>";
+
+                    _ = _emailService.SendEmailAsync(employerEmail, $"[JobsNow] Kết quả kiểm duyệt vị trí {position.TenViTri}", emailBody);
+                }
+
+                return Ok(new { success = true, message = request.IsApproved ? "Đã duyệt vị trí thành công!" : "Đã từ chối vị trí!" });
             }
             catch (Exception ex)
             {

@@ -29,6 +29,10 @@ builder.Services.AddHttpClient<IAiAnalysisService, AiAnalysisService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 // Đăng ký Background Service chạy ngầm
 builder.Services.AddHostedService<TKVL.Services.DailyJobAlertService>();
+// Đăng ký dịch vụ quét ngầm tự động reset gói hết hạn
+builder.Services.AddHostedService<SubscriptionCleanupService>();
+// Đăng ký dịch vụ quét ngầm tự động đóng các tin tuyển dụng hết hạn
+builder.Services.AddHostedService<JobExpirationCleanupService>();
 
 // 2. Cấu hình Database
 builder.Services.AddDbContext<JobPortalDbContext>(options =>

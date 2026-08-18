@@ -88,10 +88,7 @@ namespace TKVL.Controllers
         {
             int maUser = GetCurrentUserId();
 
-            // 1. Kiểm tra thông tin công ty và trạng thái phê duyệt
-            var company = await _context.CongTies
-                .FirstOrDefaultAsync(c => c.MaUser == maUser);
-
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == maUser);
             if (company == null)
                 return BadRequest(new { success = false, message = "Bạn chưa khởi tạo Hồ sơ doanh nghiệp!" });
 
@@ -101,7 +98,15 @@ namespace TKVL.Controllers
             if (request.DanhSachViTri == null || request.DanhSachViTri.Count == 0)
                 return BadRequest(new { success = false, message = "Vui lòng thêm ít nhất 1 vị trí công việc!" });
 
-            // 🌟 2. Kiểm tra đặc quyền NTD_VIP_JOB còn hạn trong bảng User_DacQuyen
+            // Validate hạn chót từng vị trí không được vượt quá hạn chót chiến dịch
+            foreach (var pos in request.DanhSachViTri)
+            {
+                if (pos.NgayHetHan.HasValue && pos.NgayHetHan.Value.Date > request.NgayHetHan.Date)
+                {
+                    return BadRequest(new { success = false, message = $"Hạn chót của vị trí '{pos.TenViTri}' không được vượt quá hạn chót chiến dịch ({request.NgayHetHan:dd/MM/yyyy})!" });
+                }
+            }
+
             bool isVipActive = await _context.UserDacQuyens
                 .Include(ud => ud.DacQuyen)
                 .AnyAsync(ud => ud.MaUser == maUser
@@ -118,8 +123,8 @@ namespace TKVL.Controllers
                     TieuDeChienDich = request.TieuDeChienDich,
                     NgayHetHan = request.NgayHetHan,
                     NgayDang = DateTime.Now,
-                    TrangThai = 0, // 0: Chờ duyệt
-                    IsPromoted = isVipActive // ⚡ Tự động gắn nhãn VIP/Nổi bật nếu sở hữu đặc quyền NTD_VIP_JOB
+                    TrangThai = 0, // 0: Chờ duyệt chiến dịch
+                    IsPromoted = isVipActive
                 };
 
                 _context.TinTuyenDungs.Add(newCampaign);
@@ -132,14 +137,17 @@ namespace TKVL.Controllers
                         MaTin = newCampaign.MaTin,
                         TenViTri = posDto.TenViTri,
                         CapBac = posDto.CapBac,
+                        KinhNghiem = posDto.KinhNghiem,
                         SoLuongTuyen = posDto.SoLuongTuyen,
                         Luong = posDto.Luong,
                         MoTaCongViec = posDto.MoTaCongViec,
                         YeuCauUngVien = posDto.YeuCauUngVien,
                         QuyenLoi = posDto.QuyenLoi,
-                        MaNganhCon = posDto.MaNganh, // 🌟 Đã sửa: MaNganh -> MaNganhCon
+                        MaNganhCon = posDto.MaNganh,
                         MaPhuong = posDto.MaPhuong,
-                        NganhNgheKhac = posDto.NganhNgheKhac
+                        NganhNgheKhac = posDto.NganhNgheKhac,
+                        TrangThai = 0, // 0: Chờ Admin duyệt vị trí này
+                        NgayHetHan = posDto.NgayHetHan ?? request.NgayHetHan // Mặc định nhận hạn chót chiến dịch nếu không đặt riêng
                     };
 
                     _context.ChiTietViTris.Add(newPosition);
@@ -162,12 +170,7 @@ namespace TKVL.Controllers
                             }
                             else
                             {
-                                var newSkill = new KyNang
-                                {
-                                    TenKyNang = keyword,
-                                    TrangThai = false
-                                };
-
+                                var newSkill = new KyNang { TenKyNang = keyword, TrangThai = false };
                                 _context.KyNangs.Add(newSkill);
                                 await _context.SaveChangesAsync();
                                 kyNangEntities.Add(newSkill);
@@ -461,6 +464,195 @@ namespace TKVL.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi phân tích AI!", error = ex.Message });
+            }
+        }
+
+        // =================================================================================
+        // 7. API: Lấy chi tiết chiến dịch và các vị trí để đổ vào Form chỉnh sửa (EditJob)
+        // =================================================================================
+        [HttpGet("job-campaign/{maTin}")]
+        public async Task<IActionResult> GetJobCampaignForEdit(int maTin)
+        {
+            try
+            {
+                int currentUserId = GetCurrentUserId();
+                var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+                if (company == null)
+                    return BadRequest(new { success = false, message = "Không tìm thấy doanh nghiệp!" });
+
+                var campaign = await _context.TinTuyenDungs
+                    .Include(t => t.ChiTietViTris)
+                        .ThenInclude(v => v.MaKyNangs)
+                    .FirstOrDefaultAsync(t => t.MaTin == maTin && t.MaCongTy == company.MaCongTy);
+
+                if (campaign == null)
+                    return NotFound(new { success = false, message = "Không tìm thấy chiến dịch tuyển dụng hoặc bạn không có quyền thao tác!" });
+
+                var result = new
+                {
+                    maTin = campaign.MaTin,
+                    tieuDeChienDich = campaign.TieuDeChienDich,
+                    ngayHetHan = campaign.NgayHetHan,
+                    trangThai = campaign.TrangThai,
+                    danhSachViTri = campaign.ChiTietViTris.Select(v => new
+                    {
+                        maViTri = v.MaViTri,
+                        tenViTri = v.TenViTri,
+                        capBac = v.CapBac,
+                        kinhNghiem= v.KinhNghiem,
+                        soLuongTuyen = v.SoLuongTuyen,
+                        luong = v.Luong,
+                        moTaCongViec = v.MoTaCongViec,
+                        yeuCauUngVien = v.YeuCauUngVien,
+                        quyenLoi = v.QuyenLoi,
+                        maNganh = v.MaNganhCon,
+                        maPhuong = v.MaPhuong,
+                        ngayHetHan = v.NgayHetHan,
+                        trangThai = v.TrangThai,
+                        lyDoTuChoi = v.LyDoTuChoi,
+                        nganhNgheKhac = v.NganhNgheKhac,
+                        danhSachKyNang = v.MaKyNangs.Select(k => k.TenKyNang).ToList()
+                    }).ToList()
+                };
+
+                return Ok(new { success = true, data = result });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi tải dữ liệu chỉnh sửa!", error = ex.Message });
+            }
+        }
+
+        // =================================================================================
+        // 8. API: Cập nhật chiến dịch & gửi duyệt lại các vị trí bị từ chối/mới thêm
+        // =================================================================================
+        [HttpPut("update-job/{maTin}")]
+        public async Task<IActionResult> UpdateJobCampaign(int maTin, [FromBody] UpdateJobRequestDto request)
+        {
+            int currentUserId = GetCurrentUserId();
+            var company = await _context.CongTies.FirstOrDefaultAsync(c => c.MaUser == currentUserId);
+            if (company == null)
+                return BadRequest(new { success = false, message = "Không tìm thấy doanh nghiệp!" });
+
+            if (request.DanhSachViTri == null || request.DanhSachViTri.Count == 0)
+                return BadRequest(new { success = false, message = "Vui lòng cung cấp ít nhất 1 vị trí cần cập nhật!" });
+
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var campaign = await _context.TinTuyenDungs
+                    .Include(t => t.ChiTietViTris)
+                        .ThenInclude(v => v.MaKyNangs)
+                    .FirstOrDefaultAsync(t => t.MaTin == maTin && t.MaCongTy == company.MaCongTy);
+
+                if (campaign == null)
+                    return NotFound(new { success = false, message = "Không tìm thấy chiến dịch tuyển dụng!" });
+
+                // Cập nhật thông tin chiến dịch nếu có thay đổi
+                if (!string.IsNullOrWhiteSpace(request.TieuDeChienDich))
+                    campaign.TieuDeChienDich = request.TieuDeChienDich;
+                if (request.NgayHetHan > DateTime.MinValue)
+                    campaign.NgayHetHan = request.NgayHetHan;
+
+                // Cập nhật các vị trí được gửi lên từ Form
+                foreach (var posDto in request.DanhSachViTri)
+                {
+                    ChiTietViTri targetPosition;
+                    if (posDto.MaViTri.HasValue && posDto.MaViTri.Value > 0)
+                    {
+                        targetPosition = campaign.ChiTietViTris.FirstOrDefault(v => v.MaViTri == posDto.MaViTri.Value);
+                        if (targetPosition == null) continue;
+
+                        // 🌟 Nếu vị trí từng bị từ chối (TrangThai = 3), đặt lại TrangThai = 0 để gửi Admin duyệt lại
+                        if (targetPosition.TrangThai == 3)
+                        {
+                            targetPosition.TrangThai = 0;
+                            targetPosition.LyDoTuChoi = null;
+                        }
+                    }
+                    else
+                    {
+                        // Thêm vị trí mới vào chiến dịch nếu có
+                        targetPosition = new ChiTietViTri
+                        {
+                            MaTin = campaign.MaTin,
+                            TrangThai = 0
+                        };
+                        _context.ChiTietViTris.Add(targetPosition);
+                    }
+
+                    targetPosition.TenViTri = posDto.TenViTri;
+                    targetPosition.CapBac = posDto.CapBac;
+                    targetPosition.KinhNghiem = posDto.KinhNghiem;
+                    targetPosition.SoLuongTuyen = posDto.SoLuongTuyen;
+                    targetPosition.Luong = posDto.Luong;
+                    targetPosition.MoTaCongViec = posDto.MoTaCongViec;
+                    targetPosition.YeuCauUngVien = posDto.YeuCauUngVien;
+                    targetPosition.QuyenLoi = posDto.QuyenLoi;
+                    targetPosition.MaNganhCon = posDto.MaNganh;
+                    targetPosition.MaPhuong = posDto.MaPhuong;
+                    targetPosition.NganhNgheKhac = posDto.NganhNgheKhac;
+                    targetPosition.NgayHetHan = posDto.NgayHetHan ?? campaign.NgayHetHan;
+
+                    // Đồng bộ Kỹ năng
+                    if (posDto.DanhSachKyNang != null)
+                    {
+                        var kyNangEntities = new List<KyNang>();
+                        foreach (var tenKN in posDto.DanhSachKyNang)
+                        {
+                            var keyword = tenKN.Trim();
+                            if (string.IsNullOrEmpty(keyword)) continue;
+
+                            var existingSkill = await _context.KyNangs
+                                .FirstOrDefaultAsync(k => k.TenKyNang.ToLower() == keyword.ToLower());
+
+                            if (existingSkill != null)
+                            {
+                                kyNangEntities.Add(existingSkill);
+                            }
+                            else
+                            {
+                                var newSkill = new KyNang { TenKyNang = keyword, TrangThai = false };
+                                _context.KyNangs.Add(newSkill);
+                                await _context.SaveChangesAsync();
+                                kyNangEntities.Add(newSkill);
+                            }
+                        }
+                        targetPosition.MaKyNangs = kyNangEntities;
+                    }
+                }
+
+                // =========================================================================
+                // 🌟 TỰ ĐỘNG ĐỒNG BỘ TRẠNG THÁI CHIẾN DỊCH TỔNG (TinTuyenDung)
+                // =========================================================================
+                bool hasActivePosition = campaign.ChiTietViTris.Any(v => v.TrangThai == 1);
+                bool hasPendingPosition = campaign.ChiTietViTris.Any(v => v.TrangThai == 0);
+
+                if (hasActivePosition)
+                {
+                    // Vẫn còn ít nhất 1 vị trí đang mở nhận CV -> Chiến dịch tiếp tục hiển thị
+                    campaign.TrangThai = 1;
+                }
+                else if (hasPendingPosition)
+                {
+                    // Không có vị trí nào đang mở, nhưng có vị trí vừa sửa/nộp lại chờ duyệt -> Chuyển chiến dịch về Chờ duyệt (0)
+                    campaign.TrangThai = 0;
+                }
+                else
+                {
+                    // Tất cả vị trí đều đã đóng (2) hoặc bị từ chối (3) -> Chuyển chiến dịch sang Tạm dừng/Đã đóng (2)
+                    campaign.TrangThai = 2;
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new { success = true, message = "Đã cập nhật và gửi duyệt lại vị trí thành công!" });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi cập nhật vị trí!", error = ex.Message });
             }
         }
 

@@ -33,6 +33,14 @@ public partial class ChiTietViTri
     public int SoLuongTuyen { get; set; }
 
     public string? NganhNgheKhac { get; set; }
+    public byte TrangThai { get; set; } = 0; // 0: Chờ duyệt | 1: Đang mở | 2: Đã đóng nhận CV | 3: Bị từ chối
+
+    // NVARCHAR(500) NULL
+    [StringLength(500)]
+    public string? LyDoTuChoi { get; set; }
+
+    // DATETIME NULL
+    public DateTime? NgayHetHan { get; set; }
 
     public virtual ICollection<DonUngTuyen> DonUngTuyens { get; set; } = new List<DonUngTuyen>();
 
