@@ -176,9 +176,9 @@ namespace TKVL.Controllers
             }
         }
 
-        // ==========================================
-        // HÀM DÙNG CHUNG: CỘNG TIỀN + MUA GÓI + GỬI EMAIL (ĐÃ CẬP NHẬT TÍNH NGUỒN TIỀN)
-        // ==========================================
+        // =========================================================================
+        // HÀM XỬ LÝ DÙNG CHUNG: CỘNG TIỀN VÍ + TỰ ĐỘNG MUA GÓI + GỬI BIÊN LAI EMAIL
+        // =========================================================================
         private async Task<bool> ProcessPaymentSuccessAsync(int maUser, decimal amount, string orderId, int? maGoi, string phuongThuc)
         {
             var asyncLock = _paymentLocks.GetOrAdd(orderId, _ => new SemaphoreSlim(1, 1));
@@ -186,7 +186,7 @@ namespace TKVL.Controllers
 
             try
             {
-                // 1. Chống cộng trùng tiền & chống gửi email trùng
+                // 1. Chống xử lý trùng lặp đơn hàng
                 bool isAlreadyProcessed = await _context.GiaoDiches
                     .AnyAsync(g => g.MaGiaoDichDoiTac == orderId && g.TrangThai == true);
 
@@ -200,7 +200,7 @@ namespace TKVL.Controllers
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.MaUser == maUser);
                 if (user == null) return false;
 
-                // 2. Cộng tiền nạp bù vào Ví
+                // 2. CỘNG TIỀN NẠP BÙ VÀO VÍ & CẬP NHẬT GIAO DỊCH NẠP TIỀN
                 user.SoDuVi += amount;
 
                 var existingGiaoDich = await _context.GiaoDiches
@@ -210,13 +210,15 @@ namespace TKVL.Controllers
                 {
                     existingGiaoDich.TrangThai = true;
                     existingGiaoDich.PhuongThuc = phuongThuc;
+                    existingGiaoDich.LoaiGiaoDich = 1; // 🌟 Đảm bảo là 1: Nạp tiền
+                    existingGiaoDich.MaGoi = null;     // 🌟 Gỡ MaGoi để không bị tính là giao dịch mua gói
                 }
                 else
                 {
                     _context.GiaoDiches.Add(new GiaoDich
                     {
                         MaUser = maUser,
-                        LoaiGiaoDich = 1,
+                        LoaiGiaoDich = 1, // 🌟 Nạp tiền
                         SoTien = amount,
                         PhuongThuc = phuongThuc,
                         MaGiaoDichDoiTac = orderId,
@@ -227,7 +229,7 @@ namespace TKVL.Controllers
 
                 await _context.SaveChangesAsync();
 
-                // 3. Xử lý Mua gói dịch vụ (Nếu có)
+                // 3. XỬ LÝ TỰ ĐỘNG MUA GÓI DỊCH VỤ (NẾU CÓ CHỌN GÓI)
                 GoiDichVu? package = null;
                 if (maGoi.HasValue)
                 {
@@ -236,122 +238,130 @@ namespace TKVL.Controllers
                             .ThenInclude(gd => gd.DacQuyen)
                         .FirstOrDefaultAsync(g => g.MaGoi == maGoi.Value);
 
-                    if (package != null && user.SoDuVi >= (package.GiaKhuyenMai ?? package.GiaTien))
+                    if (package != null)
                     {
                         decimal giaThucTe = package.GiaKhuyenMai ?? package.GiaTien;
-                        user.SoDuVi -= giaThucTe;
 
-                        var dacQuyenXemCv = package.GoiDichVu_DacQuyens
-                            .FirstOrDefault(dq => dq.DacQuyen != null && dq.DacQuyen.MaCode == "NTD_UNLOCK_CV");
-
-                        if (dacQuyenXemCv != null && dacQuyenXemCv.SoLuong.HasValue)
+                        if (user.SoDuVi >= giaThucTe)
                         {
-                            user.LuotXemCvConLai = (user.LuotXemCvConLai) + dacQuyenXemCv.SoLuong.Value;
-                        }
+                            // Trừ tiền mua gói từ ví
+                            user.SoDuVi -= giaThucTe;
 
-                        DateTime ngayBatDau = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now
-                                              ? user.NgayHetHanGoi.Value
-                                              : DateTime.Now;
+                            // Cộng lượt mở khóa CV (nếu có đặc quyền)
+                            var dacQuyenXemCv = package.GoiDichVu_DacQuyens
+                                .FirstOrDefault(dq => dq.DacQuyen != null && dq.DacQuyen.MaCode == "NTD_UNLOCK_CV");
 
-                        switch (package.LoaiGoi)
-                        {
-                            case 1: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
-                            case 2: user.NgayHetHanGoi = ngayBatDau.AddMonths(package.DonViThoiGian ?? 0); break;
-                            case 3: user.NgayHetHanGoi = ngayBatDau.AddYears(package.DonViThoiGian ?? 0); break;
-                            default: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
-                        }
-
-                        foreach (var item in package.GoiDichVu_DacQuyens)
-                        {
-                            var userDacQuyen = await _context.UserDacQuyens
-                                .FirstOrDefaultAsync(ud => ud.MaUser == maUser && ud.MaDacQuyen == item.MaDacQuyen);
-
-                            if (userDacQuyen != null)
+                            if (dacQuyenXemCv != null && dacQuyenXemCv.SoLuong.HasValue)
                             {
-                                if (item.SoLuong.HasValue)
-                                    userDacQuyen.SoLuotConLai = (userDacQuyen.SoLuotConLai ?? 0) + item.SoLuong.Value;
-                                userDacQuyen.NgayHetHan = user.NgayHetHanGoi.Value;
+                                user.LuotXemCvConLai = (user.LuotXemCvConLai) + dacQuyenXemCv.SoLuong.Value;
                             }
-                            else
+
+                            // Tính thời hạn gói mới
+                            DateTime ngayBatDau = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now
+                                                  ? user.NgayHetHanGoi.Value
+                                                  : DateTime.Now;
+
+                            switch (package.LoaiGoi)
                             {
-                                _context.UserDacQuyens.Add(new UserDacQuyen
+                                case 1: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
+                                case 2: user.NgayHetHanGoi = ngayBatDau.AddMonths(package.DonViThoiGian ?? 0); break;
+                                case 3: user.NgayHetHanGoi = ngayBatDau.AddYears(package.DonViThoiGian ?? 0); break;
+                                default: user.NgayHetHanGoi = ngayBatDau.AddDays(package.DonViThoiGian ?? 0); break;
+                            }
+
+                            // Cập nhật các đặc quyền vào bảng UserDacQuyens
+                            foreach (var item in package.GoiDichVu_DacQuyens)
+                            {
+                                var userDacQuyen = await _context.UserDacQuyens
+                                    .FirstOrDefaultAsync(ud => ud.MaUser == maUser && ud.MaDacQuyen == item.MaDacQuyen);
+
+                                if (userDacQuyen != null)
                                 {
-                                    MaUser = maUser,
-                                    MaDacQuyen = item.MaDacQuyen,
-                                    SoLuotConLai = item.SoLuong,
-                                    NgayHetHan = user.NgayHetHanGoi.Value
-                                });
+                                    if (item.SoLuong.HasValue)
+                                        userDacQuyen.SoLuotConLai = (userDacQuyen.SoLuotConLai ?? 0) + item.SoLuong.Value;
+                                    userDacQuyen.NgayHetHan = user.NgayHetHanGoi.Value;
+                                }
+                                else
+                                {
+                                    _context.UserDacQuyens.Add(new UserDacQuyen
+                                    {
+                                        MaUser = maUser,
+                                        MaDacQuyen = item.MaDacQuyen,
+                                        SoLuotConLai = item.SoLuong,
+                                        NgayHetHan = user.NgayHetHanGoi.Value
+                                    });
+                                }
                             }
+
+                            // 🌟 LƯU GIAO DỊCH MUA GÓI (LoaiGiaoDich = 2)
+                            _context.GiaoDiches.Add(new GiaoDich
+                            {
+                                MaUser = maUser,
+                                MaGoi = package.MaGoi,
+                                LoaiGiaoDich = 2, // 🌟 Giao dịch Mua gói
+                                SoTien = giaThucTe,
+                                PhuongThuc = "Ví nội bộ (Tự động)",
+                                NgayGd = DateTime.Now,
+                                TrangThai = true
+                            });
+
+                            await _context.SaveChangesAsync();
                         }
-
-                        _context.GiaoDiches.Add(new GiaoDich
-                        {
-                            MaUser = maUser,
-                            MaGoi = package.MaGoi,
-                            LoaiGiaoDich = 2,
-                            SoTien = giaThucTe,
-                            PhuongThuc = "Ví nội bộ (Tự động)",
-                            NgayGd = DateTime.Now,
-                            TrangThai = true
-                        });
-
-                        await _context.SaveChangesAsync();
                     }
                 }
 
                 await transaction.CommitAsync();
 
-                // 4. GỬI EMAIL BIÊN LAI ĐIỆN TỬ (TÍNH TỔNG GIÁ TRỊ GÓI & BÓC TÁCH NGUỒN TIỀN)
+                // 4. GỬI EMAIL BIÊN LAI ĐIỆN TỬ
                 try
                 {
                     decimal giaTriGoi = package != null ? (package.GiaKhuyenMai ?? package.GiaTien) : amount;
                     decimal soTienTuVi = package != null ? Math.Max(0, giaTriGoi - amount) : 0;
 
-                    string tenDichVu = package != null ? $"Kích hoạt {package.TenGoi}" : "Nạp tiền vào Ví điện tử TKVL";
+                    string tenDichVu = package != null ? $"Kích hoạt {package.TenGoi}" : "Nạp tiền vào Ví điện tử JobsNow";
                     string moTaGiaoDich = package != null
                         ? "Hệ thống đã nhận được tiền thanh toán và thực hiện <b>kích hoạt gói dịch vụ tự động</b> thành công."
                         : "Hệ thống đã ghi nhận số tiền nạp thành công vào số dư Ví điện tử của bạn.";
 
-                    // Bóc tách nguồn tiền: Nếu gói 750k, nạp bù 650k, ví cũ 100k -> Báo chi tiết cả 2
                     string chiTietNguonTien = (package != null && soTienTuVi > 0)
                         ? $@"
-                        <tr>
-                            <td style='padding: 10px; border: 1px solid #eee;'><b>Nguồn tiền thanh toán:</b></td>
-                            <td style='padding: 10px; border: 1px solid #eee;'>
-                                • Nạp mới qua {phuongThuc}: <b>{amount:N0} VNĐ</b><br/>
-                                • Trừ số dư ví hiện có: <b>{soTienTuVi:N0} VNĐ</b>
-                            </td>
-                        </tr>"
+                <tr>
+                    <td style='padding: 10px; border: 1px solid #eee;'><b>Nguồn tiền thanh toán:</b></td>
+                    <td style='padding: 10px; border: 1px solid #eee;'>
+                        • Nạp mới qua {phuongThuc}: <b>{amount:N0} VNĐ</b><br/>
+                        • Trừ số dư ví hiện có: <b>{soTienTuVi:N0} VNĐ</b>
+                    </td>
+                </tr>"
                         : $@"
-                        <tr>
-                            <td style='padding: 10px; border: 1px solid #eee;'><b>Phương thức:</b></td>
-                            <td style='padding: 10px; border: 1px solid #eee;'>{phuongThuc}</td>
-                        </tr>";
+                <tr>
+                    <td style='padding: 10px; border: 1px solid #eee;'><b>Phương thức:</b></td>
+                    <td style='padding: 10px; border: 1px solid #eee;'>{phuongThuc}</td>
+                </tr>";
 
                     string expirationBlock = (package != null && user.NgayHetHanGoi.HasValue) ? $@"
-                    <div style='background-color: #fffbe6; border-left: 4px solid #faad14; padding: 12px; margin-top: 20px;'>
-                        <p style='margin: 0; font-size: 15px;'>⏳ <b>Hạn sử dụng gói dịch vụ mới của bạn:</b> <span style='color: #cf1322; font-weight: bold;'>{user.NgayHetHanGoi.Value:dd/MM/yyyy}</span></p>
-                    </div>" : "";
+            <div style='background-color: #fffbe6; border-left: 4px solid #faad14; padding: 12px; margin-top: 20px;'>
+                <p style='margin: 0; font-size: 15px;'>⏳ <b>Hạn sử dụng gói dịch vụ mới của bạn:</b> <span style='color: #cf1322; font-weight: bold;'>{user.NgayHetHanGoi.Value:dd/MM/yyyy}</span></p>
+            </div>" : "";
 
                     string emailBody = $@"
-                    <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px;'>
-                        <div style='text-align: center; border-bottom: 2px solid #D82D8B; padding-bottom: 15px; margin-bottom: 20px;'>
-                            <h2 style='color: #D82D8B; margin: 0;'>BIÊN LAI ĐIỆN TỬ</h2>
-                            <p style='color: #666; margin: 5px 0 0 0;'>JobsNow - Hệ thống Tuyển dụng Chuyên nghiệp</p>
-                        </div>
-                        <p>Xin chào <b>{user.HoTen}</b>,</p>
-                        <p>{moTaGiaoDich} Chi tiết giao dịch:</p>
-                        <table style='width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #f9f9f9;'>
-                            <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Mã đơn hàng:</b></td><td style='padding: 10px; border: 1px solid #eee;'>#{orderId}</td></tr>
-                            <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Thời gian giao dịch:</b></td><td style='padding: 10px; border: 1px solid #eee;'>{DateTime.Now:dd/MM/yyyy HH:mm}</td></tr>
-                            <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Nội dung thanh toán:</b></td><td style='padding: 10px; border: 1px solid #eee; color: #0056b3; font-weight: bold;'>{tenDichVu}</td></tr>
-                            <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Tổng giá trị dịch vụ:</b></td><td style='padding: 10px; border: 1px solid #eee; color: #389e0d; font-weight: bold;'>{giaTriGoi:N0} VNĐ</td></tr>
-                            {chiTietNguonTien}
-                            <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Trạng thái:</b></td><td style='padding: 10px; border: 1px solid #eee; color: #389e0d; font-weight: bold;'>Hoàn tất thành công</td></tr>
-                        </table>
-                        {expirationBlock}
-                        <p style='color: #8c8c8c; font-size: 13px; text-align: center; margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 15px;'>Đây là email xác nhận giao dịch tự động từ hệ thống JobsNow.</p>
-                    </div>";
+            <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px;'>
+                <div style='text-align: center; border-bottom: 2px solid #D82D8B; padding-bottom: 15px; margin-bottom: 20px;'>
+                    <h2 style='color: #D82D8B; margin: 0;'>BIÊN LAI ĐIỆN TỬ</h2>
+                    <p style='color: #666; margin: 5px 0 0 0;'>JobsNow - Hệ thống Tuyển dụng Chuyên nghiệp</p>
+                </div>
+                <p>Xin chào <b>{user.HoTen}</b>,</p>
+                <p>{moTaGiaoDich} Chi tiết giao dịch:</p>
+                <table style='width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #f9f9f9;'>
+                    <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Mã đơn hàng:</b></td><td style='padding: 10px; border: 1px solid #eee;'>#{orderId}</td></tr>
+                    <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Thời gian giao dịch:</b></td><td style='padding: 10px; border: 1px solid #eee;'>{DateTime.Now:dd/MM/yyyy HH:mm}</td></tr>
+                    <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Nội dung thanh toán:</b></td><td style='padding: 10px; border: 1px solid #eee; color: #0056b3; font-weight: bold;'>{tenDichVu}</td></tr>
+                    <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Tổng giá trị dịch vụ:</b></td><td style='padding: 10px; border: 1px solid #eee; color: #389e0d; font-weight: bold;'>{giaTriGoi:N0} VNĐ</td></tr>
+                    {chiTietNguonTien}
+                    <tr><td style='padding: 10px; border: 1px solid #eee;'><b>Trạng thái:</b></td><td style='padding: 10px; border: 1px solid #eee; color: #389e0d; font-weight: bold;'>Hoàn tất thành công</td></tr>
+                </table>
+                {expirationBlock}
+                <p style='color: #8c8c8c; font-size: 13px; text-align: center; margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 15px;'>Đây là email xác nhận giao dịch tự động từ hệ thống JobsNow.</p>
+            </div>";
 
                     await _emailService.SendEmailAsync(user.Email, $"[JobsNow] Biên lai giao dịch #{orderId} thành công", emailBody);
                 }
@@ -369,7 +379,9 @@ namespace TKVL.Controllers
             }
         }
 
-        // 1. API TẠO URL THANH TOÁN VNPAY & LƯU GIAO DỊCH CHỜ
+        // =========================================================================
+        // 1. API TẠO URL THANH TOÁN VNPAY & LƯU GIAO DỊCH CHỜ (NẠP TIỀN)
+        // =========================================================================
         [HttpPost("create-vnpay-url")]
         public async Task<IActionResult> CreateVnPayUrl([FromBody] CreatePaymentVNPay dto)
         {
@@ -379,14 +391,15 @@ namespace TKVL.Controllers
 
             string txnRef = DateTime.Now.Ticks.ToString();
 
+            // 🌟 GIAO DỊCH QUA CỔNG THANH TOÁN LUÔN LÀ NẠP TIỀN (LoaiGiaoDich = 1)
             var giaoDich = new GiaoDich
             {
                 MaUser = dto.MaUser,
                 SoTien = dto.SoTien,
-                MaGoi = dto.MaGoi > 0 ? dto.MaGoi : null,
+                MaGoi = dto.MaGoi > 0 ? dto.MaGoi : null, // Lưu tạm để Callback đọc được gói cần kích hoạt
                 MaGiaoDichDoiTac = txnRef,
                 PhuongThuc = "VNPAY",
-                LoaiGiaoDich = dto.MaGoi > 0 ? (byte)2 : (byte)1,
+                LoaiGiaoDich = 1, // 🌟 LUÔN LÀ 1 (Nạp tiền), KHÔNG ĐỂ LÀ 2
                 TrangThai = false,
                 NgayGd = timeNow
             };
