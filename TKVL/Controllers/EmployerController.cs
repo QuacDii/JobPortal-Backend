@@ -241,12 +241,11 @@ namespace TKVL.Controllers
 
         [HttpGet("jobs/{maViTri}/candidates")]
         [Authorize(Roles = "1")]
-        public async Task<IActionResult> GetCandidatesByJob(int maViTri)
+        public async Task<IActionResult> GetCandidatesByJob(int maViTri, [FromQuery] int? viTriId = null)
         {
             var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)
                            ?? User.Claims.FirstOrDefault(c => c.Type == "nameid")
                            ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
-
             if (userIdClaim == null) return Unauthorized(new { message = "Vui lòng đăng nhập!" });
             int maUser = int.Parse(userIdClaim.Value);
 
@@ -254,42 +253,73 @@ namespace TKVL.Controllers
             if (company == null)
                 return BadRequest(new { message = "Không tìm thấy thông tin công ty." });
 
-            var jobExists = await _context.TinTuyenDungs
-                .AnyAsync(b => b.ChiTietViTris.Select(c => c.MaViTri).Contains(maViTri) && b.MaCongTy == company.MaCongTy);
+            // 🌟 TÌM CHIẾN DỊCH: Nhận diện cả khi maViTri là MaTin hoặc là một trong các MaViTri con
+            var tinTuyenDung = await _context.TinTuyenDungs
+                .Include(t => t.ChiTietViTris)
+                .FirstOrDefaultAsync(b => (b.MaTin == maViTri || b.ChiTietViTris.Any(c => c.MaViTri == maViTri)) && b.MaCongTy == company.MaCongTy);
 
-            if (!jobExists)
+            if (tinTuyenDung == null)
                 return NotFound(new { message = "Không tìm thấy bài tuyển dụng hoặc bạn không có quyền truy cập." });
 
-            var candidates = await _context.DonUngTuyens
+            // Lấy tất cả mã vị trí thuộc chiến dịch này
+            var allViTriIds = tinTuyenDung.ChiTietViTris.Select(v => v.MaViTri).ToList();
+
+            var query = _context.DonUngTuyens
                 .Include(d => d.MaCvNavigation)
                     .ThenInclude(u => u.MaUserNavigation)
                 .Include(d => d.ChiTietPhanTichAi)
-                .Where(d => d.MaViTri == maViTri)
+                .Include(d => d.MaViTriNavigation)
+                .Where(d => allViTriIds.Contains(d.MaViTri));
+
+            // Nếu NTD chọn lọc riêng theo 1 vị trí con
+            if (viTriId.HasValue && viTriId.Value > 0)
+            {
+                query = query.Where(d => d.MaViTri == viTriId.Value);
+            }
+
+            var rawCandidates = await query
                 .OrderByDescending(d => d.NgayNop)
-                .Select(d => new CandidateFunnelDto
-                {
-                    MaDon = d.MaDon,
-                    MaUngVien = d.MaCvNavigation.MaUser,
-                    HoTen = d.MaCvNavigation.MaUserNavigation.HoTen,
-                    Email = d.MaCvNavigation.MaUserNavigation.Email,
-                    NgayNop = d.NgayNop,
-                    TrangThai = d.TrangThai,
-                    CvUrl = d.MaCvNavigation.DuLieuCv,
-
-                    IsPendingAi = d.ChiTietPhanTichAi == null,
-
-                    DiemMatchingTong = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemMatchingTong) : 0,
-                    DiemKyNang = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKyNang) : 0,
-                    DiemKinhNghiem = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKinhNghiem) : 0,
-                    DiemLinhVuc = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemLinhVuc) : 0,
-                    DiemCapBac = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemCapBac) : 0,
-
-                    DiemManhTieuBieu = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemManhTieuBieu : null,
-                    DiemConThieu = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemConThieu : null
-                })
                 .ToListAsync();
 
-            return Ok(candidates);
+            var candidates = rawCandidates.Select(d => new
+            {
+                maDon = d.MaDon,
+                maUngVien = d.MaCvNavigation != null ? d.MaCvNavigation.MaUser : 0,
+                hoTen = d.MaCvNavigation?.MaUserNavigation?.HoTen ?? "Ứng viên",
+                email = d.MaCvNavigation?.MaUserNavigation?.Email ?? "N/A",
+                ngayNop = d.NgayNop,
+                trangThai = d.TrangThai,
+                cvUrl = d.MaCvNavigation?.DuLieuCv,
+                maViTri = d.MaViTri,
+                tenViTri = d.MaViTriNavigation?.TenViTri ?? "Vị trí tuyển dụng",
+                isPendingAi = d.ChiTietPhanTichAi == null,
+                diemMatchingTong = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemMatchingTong) : 0,
+                diemKyNang = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKyNang) : 0,
+                diemKinhNghiem = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemKinhNghiem) : 0,
+                diemLinhVuc = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemLinhVuc) : 0,
+                diemCapBac = d.ChiTietPhanTichAi != null ? (int)Math.Round((double)d.ChiTietPhanTichAi.DiemCapBac) : 0,
+                diemManhTieuBieu = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemManhTieuBieu : null,
+                diemConThieu = d.ChiTietPhanTichAi != null ? d.ChiTietPhanTichAi.DiemConThieu : null
+            }).ToList();
+
+            // Danh sách các vị trí con trong chiến dịch kèm số lượng hồ sơ
+            var positions = tinTuyenDung.ChiTietViTris.Select(v => new
+            {
+                maViTri = v.MaViTri,
+                tenViTri = v.TenViTri,
+                capBac = v.CapBac,
+                soLuongTuyen = v.SoLuongTuyen,
+                soLuongUngVien = rawCandidates.Count(c => c.MaViTri == v.MaViTri)
+            }).ToList();
+
+            return Ok(new
+            {
+                success = true,
+                tieuDeChienDich = tinTuyenDung.TieuDeChienDich,
+                maTin = tinTuyenDung.MaTin,
+                positions = positions,
+                data = candidates
+            });
         }
 
         [HttpPut("applications/{maDon}/status")]
