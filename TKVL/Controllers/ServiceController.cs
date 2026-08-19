@@ -327,6 +327,18 @@ namespace TKVL.Controllers
             if (userIdClaim == null) return Unauthorized(new { message = "Vui lòng đăng nhập!" });
             int maUser = int.Parse(userIdClaim.Value);
 
+            bool isJustPurchased = await _context.GiaoDiches.AnyAsync(g =>
+                g.MaUser == maUser &&
+                g.MaGoi == request.MaGoi &&
+                g.LoaiGiaoDich == 2 &&
+                g.TrangThai == true &&
+                g.NgayGd >= DateTime.Now.AddSeconds(-60));
+
+            if (isJustPurchased)
+            {
+                return BadRequest(new { message = "Gói dịch vụ này vừa được kích hoạt thành công. Vui lòng không thao tác lại!" });
+            }
+
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
@@ -530,8 +542,14 @@ namespace TKVL.Controllers
             var user = await _context.Users.FirstOrDefaultAsync(u => u.MaUser == maUser);
             if (user == null) return NotFound();
 
+<<<<<<< HEAD
             var aiRecords = await _context.UserDacQuyens
                 .Where(ud => ud.MaUser == maUser)
+=======
+            // 🌟 1. TÍNH TỔNG SỐ LƯỢT AI CÒN HẠN TỪ BẢNG UserDacQuyens
+            var totalAiTurns = await _context.UserDacQuyens
+                .Where(ud => ud.MaUser == maUser && ud.NgayHetHan > DateTime.Now)
+>>>>>>> c7e9f9fe8bacdbeedde69f71aa6686d1153b13fc
                 .Join(_context.DacQuyens,
                       ud => ud.MaDacQuyen,
                       dq => dq.MaDacQuyen,
@@ -551,31 +569,40 @@ namespace TKVL.Controllers
                     .Sum(x => x.SoLuotConLai.Value);
             }
 
+<<<<<<< HEAD
             var allPurchasedPackages = await _context.GiaoDiches
+=======
+            // 🌟 2. LẤY GIAO DỊCH MUA GÓI GẦN NHẤT CỦA USER
+            bool isVipActive = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now;
+
+            var lastPurchasedPackage = await _context.GiaoDiches
+>>>>>>> c7e9f9fe8bacdbeedde69f71aa6686d1153b13fc
                 .Include(g => g.MaGoiNavigation)
                 .Where(g => g.MaUser == maUser && g.LoaiGiaoDich == 2 && g.TrangThai == true && g.MaGoi != null)
                 .OrderByDescending(g => g.NgayGd)
-                .Select(g => new
-                {
-                    maGoi = g.MaGoi,
-                    tenGoi = g.MaGoiNavigation != null ? g.MaGoiNavigation.TenGoi : "Gói VIP",
-                    soTien = g.SoTien,
-                    ngayMua = g.NgayGd
-                })
-                .ToListAsync();
+                .FirstOrDefaultAsync();
 
             string tenGoi = "Miễn phí";
             DateTime? ngayMua = null;
-            bool isVipActive = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi > DateTime.Now;
 
-            if (isVipActive)
+            if (isVipActive && lastPurchasedPackage != null)
             {
+<<<<<<< HEAD
                 tenGoi = allPurchasedPackages.Count > 1
                     ? $"Đã kích hoạt ({allPurchasedPackages.Count} gói VIP)"
                     : (allPurchasedPackages.FirstOrDefault()?.tenGoi ?? "Tài khoản VIP");
                 ngayMua = allPurchasedPackages.FirstOrDefault()?.ngayMua;
             }
 
+=======
+                tenGoi = lastPurchasedPackage.MaGoiNavigation != null
+                    ? lastPurchasedPackage.MaGoiNavigation.TenGoi
+                    : "Tài khoản VIP";
+                ngayMua = lastPurchasedPackage.NgayGd;
+            }
+
+            // 🌟 3. DANH SÁCH MÃ ĐẶC QUYỀN ĐANG CÓ HIỆU LỰC
+>>>>>>> c7e9f9fe8bacdbeedde69f71aa6686d1153b13fc
             var activePrivileges = await _context.UserDacQuyens
                 .Where(ud => ud.MaUser == maUser && ud.NgayHetHan > DateTime.Now)
                 .Join(_context.DacQuyens,
@@ -585,6 +612,10 @@ namespace TKVL.Controllers
                 .Distinct()
                 .ToListAsync();
 
+<<<<<<< HEAD
+=======
+            // 🌟 4. TRẢ VỀ DỮ LIỆU RESPONSE ĐỒNG BỘ
+>>>>>>> c7e9f9fe8bacdbeedde69f71aa6686d1153b13fc
             return Ok(new
             {
                 soDuVi = user.SoDuVi,
@@ -594,7 +625,18 @@ namespace TKVL.Controllers
                 tenGoiHienTai = tenGoi,
                 ngayMua = ngayMua,
                 cacDacQuyen = activePrivileges,
-                danhSachGoiDaMua = isVipActive ? (object)allPurchasedPackages : new List<object>()
+                danhSachGoiDaMua = isVipActive && lastPurchasedPackage != null
+                    ? new List<object>
+                    {
+                new
+                {
+                    maGoi = lastPurchasedPackage.MaGoi,
+                    tenGoi = lastPurchasedPackage.MaGoiNavigation != null ? lastPurchasedPackage.MaGoiNavigation.TenGoi : "Gói VIP",
+                    soTien = lastPurchasedPackage.SoTien,
+                    ngayMua = lastPurchasedPackage.NgayGd
+                }
+                    }
+                    : new List<object>()
             });
         }
     }
