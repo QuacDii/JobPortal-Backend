@@ -2,7 +2,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using TKVL.Models;
 using TKVL.Services;
 
@@ -16,17 +19,25 @@ namespace TKVL.Controllers
         private readonly JobPortalDbContext _context;
         private readonly IEmailService _emailService;
 
-        public JobApplicationController(JobPortalDbContext context)
+        // 🌟 1. ĐÃ INJECT ĐẦY ĐỦ IEmailService VÀO CONSTRUCTOR
+        public JobApplicationController(JobPortalDbContext context, IEmailService emailService)
         {
             _context = context;
+            _emailService = emailService;
         }
 
+        // =========================================================================
+        // 1. LẤY DANH SÁCH VIỆC LÀM ĐÃ ỨNG TUYỂN CỦA ỨNG VIÊN
+        // =========================================================================
         [HttpGet("my-applications")]
         public async Task<IActionResult> GetMyAppliedJobs()
         {
             try
             {
-                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                               ?? User.FindFirst("nameid")?.Value
+                               ?? User.FindFirst("sub")?.Value;
+
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
                 {
                     return Unauthorized(new { success = false, message = "Không xác định được người dùng." });
@@ -42,12 +53,19 @@ namespace TKVL.Controllers
                     .Select(d => new
                     {
                         maDon = d.MaDon,
-                        tenViTri = d.MaViTriNavigation.TenViTri,
-                        tenCongTy = d.MaViTriNavigation.MaTinNavigation.MaCongTyNavigation.TenCongTy,
-                        luong = d.MaViTriNavigation.Luong,
+                        maViTri = d.MaViTri,
+                        // 🌟 2. BẮT BUỘC TRẢ VỀ maTin ĐỂ FRONTEND CHUYỂN TRANG
+                        maTin = d.MaViTriNavigation != null ? d.MaViTriNavigation.MaTin : 0,
+                        tenViTri = d.MaViTriNavigation != null ? d.MaViTriNavigation.TenViTri : "Vị trí tuyển dụng",
+                        tenCongTy = (d.MaViTriNavigation != null && d.MaViTriNavigation.MaTinNavigation != null && d.MaViTriNavigation.MaTinNavigation.MaCongTyNavigation != null)
+                                    ? d.MaViTriNavigation.MaTinNavigation.MaCongTyNavigation.TenCongTy : "Công ty ẩn danh",
+                        logo = (d.MaViTriNavigation != null && d.MaViTriNavigation.MaTinNavigation != null && d.MaViTriNavigation.MaTinNavigation.MaCongTyNavigation != null)
+                                    ? d.MaViTriNavigation.MaTinNavigation.MaCongTyNavigation.Logo : null,
+                        luong = d.MaViTriNavigation != null ? d.MaViTriNavigation.Luong : "Thỏa thuận",
                         ngayNop = d.NgayNop,
                         trangThai = d.TrangThai,
-                        tieuDeCV = d.MaCvNavigation.TieuDe
+                        maCv = d.MaCv,
+                        tieuDeCV = d.MaCvNavigation != null ? d.MaCvNavigation.TieuDe : "Hồ sơ của tôi"
                     })
                     .ToListAsync();
 
@@ -59,17 +77,21 @@ namespace TKVL.Controllers
             }
         }
 
+        // =========================================================================
+        // 2. GỬI EMAIL NHẮC NHỞ NHÀ TUYỂN DỤNG
+        // =========================================================================
         [HttpPost("remind-employer/{maDon}")]
-        [Authorize] // Yêu cầu đăng nhập
         public async Task<IActionResult> RemindEmployer(int maDon)
         {
-            // 1. Lấy maUser từ Token
-            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)
-                           ?? User.Claims.FirstOrDefault(c => c.Type == "nameid");
-            if (userIdClaim == null) return Unauthorized();
-            int currentUserId = int.Parse(userIdClaim.Value);
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                           ?? User.FindFirst("nameid")?.Value
+                           ?? User.FindFirst("sub")?.Value;
 
-            // 2. Tìm đơn ứng tuyển kèm thông tin Tin tuyển dụng, Công ty và Email NTD
+            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int currentUserId))
+            {
+                return Unauthorized();
+            }
+
             var application = await _context.DonUngTuyens
                 .Include(d => d.MaCvNavigation)
                 .Include(d => d.MaViTriNavigation)
@@ -81,30 +103,36 @@ namespace TKVL.Controllers
             if (application == null)
                 return NotFound(new { message = "Không tìm thấy đơn ứng tuyển!" });
 
-            // 3. Kiểm tra xem có đúng là ứng viên này nộp đơn không
             if (application.MaCvNavigation.MaUser != currentUserId)
                 return Forbid();
 
-            // 4. Kiểm tra logic 7 ngày ở Backend
             var daysDiff = (DateTime.Now - application.NgayNop).TotalDays;
             if (daysDiff < 7)
             {
                 return BadRequest(new { message = "Chỉ có thể nhắc nhở sau 7 ngày kể từ lúc nộp hồ sơ!" });
             }
 
-            // 5. Gửi Email nhắc nhở tới Nhà tuyển dụng
             try
             {
-                var employerEmail = application.MaViTriNavigation.MaTinNavigation.MaCongTyNavigation.MaUserNavigation.Email;
-                var jobTitle = application.MaViTriNavigation.TenViTri;
-                var applicantName = User.Identity?.Name ?? "Một ứng viên";
+                var employerEmail = application.MaViTriNavigation?.MaTinNavigation?.MaCongTyNavigation?.MaUserNavigation?.Email;
+                if (string.IsNullOrEmpty(employerEmail))
+                {
+                    return BadRequest(new { message = "Nhà tuyển dụng chưa cập nhật email nhận tin!" });
+                }
 
-                string emailSubject = $"[JobsNow] Lời nhắc phản hồi hồ sơ vị trí {jobTitle}";
+                var jobTitle = application.MaViTriNavigation?.TenViTri ?? "Vị trí tuyển dụng";
+                var applicantName = application.MaCvNavigation?.TieuDe ?? "Ứng viên";
+
+                string emailSubject = $"[JobsNow] Lời nhắc phản hồi hồ sơ ứng tuyển vị trí {jobTitle}";
                 string emailBody = $@"
-            <h3>Xin chào Nhà tuyển dụng,</h3>
-            <p>Ứng viên <b>{applicantName}</b> đã nộp hồ sơ vào vị trí <b>{jobTitle}</b> vào ngày {application.NgayNop:dd/MM/yyyy}.</p>
-            <p>Ứng viên vừa gửi một lời nhắc lịch sự mong muốn nhận được thông tin phản hồi từ quý công ty.</p>
-            <p>Vui lòng đăng nhập hệ thống JobsNow để duyệt và cập nhật trạng thái hồ sơ.</p>";
+                    <div style='font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; color: #333;'>
+                        <h3 style='color: #1890ff;'>Xin chào Nhà tuyển dụng,</h3>
+                        <p>Ứng viên đã nộp hồ sơ vào vị trí <b>{jobTitle}</b> vào ngày <b>{application.NgayNop:dd/MM/yyyy}</b>.</p>
+                        <p>Ứng viên vừa gửi một lời nhắc lịch sự mong muốn nhận được thông tin phản hồi từ quý công ty.</p>
+                        <p>Vui lòng đăng nhập hệ thống JobsNow để duyệt và cập nhật trạng thái hồ sơ.</p>
+                        <hr style='border: none; border-top: 1px solid #eee; margin: 20px 0;'/>
+                        <p style='font-size: 12px; color: #888;'>Hệ thống Tuyển dụng JobsNow</p>
+                    </div>";
 
                 await _emailService.SendEmailAsync(employerEmail, emailSubject, emailBody);
 

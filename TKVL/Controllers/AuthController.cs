@@ -66,29 +66,38 @@ namespace TKVL.Controllers
             if (string.IsNullOrWhiteSpace(dto.Email))
                 return BadRequest(new { success = false, message = "Email không được để trống!" });
 
+            // 🌟 Kiểm tra xem Email đã được tài khoản khác xác thực chính chủ hay chưa
+            var verifiedUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == dto.Email && u.IsEmailVerified == true);
+            if (verifiedUser != null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Email này đã được đăng ký và xác thực bởi một tài khoản khác!"
+                });
+            }
+
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
             if (user == null)
                 return NotFound(new { success = false, message = "Không tìm thấy tài khoản với email này!" });
 
-            // Sinh mã ngẫu nhiên 6 chữ số
             string otp = Random.Shared.Next(100000, 999999).ToString();
-
             user.OtpCode = otp;
             user.OtpExpiry = DateTime.Now.AddMinutes(5);
             await _context.SaveChangesAsync();
 
             string htmlBody = $@"
-            <div style='font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f5;'>
-                <div style='max-width: 500px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #e8e8e8;'>
-                    <h2 style='color: #1890ff; text-align: center;'>Mã Xác Thực JobsNow</h2>
-                    <p>Xin chào <b>{user.HoTen ?? "Ứng viên"}</b>,</p>
-                    <p>Mã OTP xác nhận Email của bạn là:</p>
-                    <div style='text-align: center; margin: 24px 0;'>
-                        <span style='font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #1890ff; background: #e6f7ff; padding: 10px 24px; border-radius: 8px;'>{otp}</span>
-                    </div>
-                    <p style='color: #8c8c8c; font-size: 13px;'>Mã này có hiệu lực trong vòng <b>5 phút</b>. Vui lòng không chia sẻ mã này cho bất kỳ ai.</p>
-                </div>
-            </div>";
+    <div style='font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f5;'>
+        <div style='max-width: 500px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #e8e8e8;'>
+            <h2 style='color: #1890ff; text-align: center;'>Mã Xác Thực JobsNow</h2>
+            <p>Xin chào <b>{user.HoTen ?? "Ứng viên"}</b>,</p>
+            <p>Mã OTP xác nhận Email của bạn là:</p>
+            <div style='text-align: center; margin: 24px 0;'>
+                <span style='font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #1890ff; background: #e6f7ff; padding: 10px 24px; border-radius: 8px;'>{otp}</span>
+            </div>
+            <p style='color: #8c8c8c; font-size: 13px;'>Mã này có hiệu lực trong vòng <b>5 phút</b>. Vui lòng không chia sẻ mã này cho bất kỳ ai.</p>
+        </div>
+    </div>";
 
             try
             {
@@ -114,25 +123,44 @@ namespace TKVL.Controllers
             if (user.OtpCode != dto.OtpCode || user.OtpExpiry < DateTime.Now)
                 return BadRequest(new { success = false, message = "Mã OTP không chính xác hoặc đã hết hạn!" });
 
-            // CHUYỂN GIAO QUYỀN SỞ HỮU EMAIL NẾU EMAIL NÀY ĐÃ TỒN TẠI Ở TÀI KHOẢN KHÁC
-            var otherOldUsers = await _context.Users
-                .Where(u => u.Email == dto.Email && u.MaUser != user.MaUser)
-                .ToListAsync();
-
-            foreach (var oldUser in otherOldUsers)
-            {
-                // Hủy xác thực và đổi email cũ của tài khoản bị trùng để giải phóng Email A
-                oldUser.IsEmailVerified = false;
-                oldUser.Email = $"unlinked_{oldUser.MaUser}_{DateTime.Now.Ticks}@jobsnow.vn";
-            }
-
-            // Xác nhận chính chủ cho người vừa nhập OTP thành công
+            // Cập nhật trạng thái xác thực
             user.IsEmailVerified = true;
             user.OtpCode = null;
             user.OtpExpiry = null;
-
             await _context.SaveChangesAsync();
-            return Ok(new { success = true, message = "Xác thực Email thành công!" });
+
+            // Sinh Token mới chứa trạng thái đã xác thực
+            bool isVip = user.NgayHetHanGoi.HasValue && user.NgayHetHanGoi.Value > DateTime.UtcNow;
+            var claims = new[]
+            {
+        new Claim(ClaimTypes.NameIdentifier, user.MaUser.ToString()),
+        new Claim(ClaimTypes.Email, user.Email),
+        new Claim(ClaimTypes.Role, user.VaiTro.ToString()),
+        new Claim("HoTen", user.HoTen ?? ""),
+        new Claim("isVip", isVip.ToString().ToLower()),
+        new Claim("isEmailVerified", "true")
+    };
+
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(Convert.ToDouble(_config["Jwt:DurationInMinutes"])),
+                Issuer = _config["Jwt:Issuer"],
+                Audience = _config["Jwt:Audience"],
+                SigningCredentials = creds
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            string newToken = tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
+
+            return Ok(new
+            {
+                success = true,
+                token = newToken,
+                message = "Xác thực Email thành công!"
+            });
         }
 
         // ==============================================================

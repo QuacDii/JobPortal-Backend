@@ -34,22 +34,22 @@ namespace TKVL.Controllers
                     .Include(t => t.ChiTietViTris)
                         .ThenInclude(c => c.MaPhuongNavigation)
                             .ThenInclude(p => p.MaTpNavigation)
-                    // 1. Chiến dịch cha phải đang hoạt động (TrangThai = 1) và còn hạn
+                    // 1. Chiến dịch cha phải đang hoạt động (TrangThai = 1) và còn hạn[cite: 9]
                     .Where(t => t.TrangThai == 1 && t.NgayHetHan >= now)
-                    // 2. Phải có ít nhất 1 vị trí con được duyệt (TrangThai = 1) và còn hạn
+                    // 2. Phải có ít nhất 1 vị trí con được duyệt (TrangThai = 1) và còn hạn[cite: 9]
                     .Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now)))
-                    // 3. Ưu tiên tin VIP lên đầu
+                    // 3. Ưu tiên tin VIP lên đầu[cite: 9]
                     .OrderByDescending(t => t.IsPromoted)
                     .ThenByDescending(t => t.MaTin)
                     .Select(t => new
                     {
                         maTin = t.MaTin,
                         tieuDeChienDich = t.TieuDeChienDich,
-                        companyName = t.MaCongTyNavigation.TenCongTy,
-                        logo = t.MaCongTyNavigation.Logo,
+                        companyName = t.MaCongTyNavigation != null ? t.MaCongTyNavigation.TenCongTy : "Công ty ẩn danh",
+                        logo = t.MaCongTyNavigation != null ? t.MaCongTyNavigation.Logo : null,
                         deadline = t.NgayHetHan,
                         isPromoted = t.IsPromoted,
-                        // CHỈ LẤY CÁC VỊ TRÍ CON HỢP LỆ
+                        // CHỈ LẤY CÁC VỊ TRÍ CON HỢP LỆ[cite: 9]
                         viTris = t.ChiTietViTris
                             .Where(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now))
                             .Select(c => new
@@ -57,9 +57,12 @@ namespace TKVL.Controllers
                                 id = c.MaViTri,
                                 title = c.TenViTri,
                                 capBac = c.CapBac,
+                                kinhNghiem = c.KinhNghiem,
                                 salaryRange = c.Luong,
                                 deadline = c.NgayHetHan,
-                                locationName = c.MaPhuongNavigation.MaTpNavigation.TenTp
+                                locationName = c.MaPhuongNavigation != null && c.MaPhuongNavigation.MaTpNavigation != null
+                                    ? c.MaPhuongNavigation.MaTpNavigation.TenTp
+                                    : "Toàn quốc"
                             }).ToList()
                     })
                     .Take(20)
@@ -78,105 +81,166 @@ namespace TKVL.Controllers
         // =================================================================
         [HttpGet("search")]
         public async Task<IActionResult> SearchJobs(
-         [FromQuery] string? keyword,
-         [FromQuery] int? maTP,
-         [FromQuery] int? maPhuong,
-         [FromQuery] int? maNganh,
-         [FromQuery] string? capBac,
-         [FromQuery] string? mucLuong,
-         [FromQuery] string? kinhNghiem 
- )
+            [FromQuery] string? keyword,
+            [FromQuery] int? maTP,
+            [FromQuery] int? maPhuong,
+            [FromQuery] string? maNganh,
+            [FromQuery] bool? isPromoted,
+            [FromQuery] string? mucLuongRadio,
+            [FromQuery] decimal? tuLuong,
+            [FromQuery] decimal? denLuong,
+            [FromQuery] string? kinhNghiem,
+            [FromQuery] string? capBac,
+            [FromQuery] string? mucLuong
+        )
         {
             try
             {
                 var now = DateTime.Now;
 
-                var query = _context.TinTuyenDungs
-                    .Include(t => t.MaCongTyNavigation)
-                    .Include(t => t.ChiTietViTris)
-                        .ThenInclude(c => c.MaPhuongNavigation)
-                            .ThenInclude(p => p.MaTpNavigation)
-                    .Where(t => t.TrangThai == 1 && t.NgayHetHan >= now)
-                    .Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now)))
+                // 🌟 1. BẮT ĐẦU TỪ VỊ TRÍ CON (ChiTietViTris) ĐỂ LỌC CHÍNH XÁC TỪNG VỊ TRÍ
+                var viTriQuery = _context.ChiTietViTris
+                    .Include(c => c.MaTinNavigation)
+                        .ThenInclude(t => t.MaCongTyNavigation)
+                    .Include(c => c.MaPhuongNavigation)
+                        .ThenInclude(p => p.MaTpNavigation)
+                    .Where(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now))
+                    .Where(c => c.MaTinNavigation.TrangThai == 1 && c.MaTinNavigation.NgayHetHan >= now)
                     .AsQueryable();
 
-                // 1. Lọc Keyword
+                // Lọc Keyword
                 if (!string.IsNullOrWhiteSpace(keyword))
                 {
                     string kw = keyword.Trim().ToLower();
-                    query = query.Where(t => t.TieuDeChienDich.ToLower().Contains(kw) ||
-                                             t.MaCongTyNavigation.TenCongTy.ToLower().Contains(kw) ||
-                                             t.ChiTietViTris.Any(c => c.TrangThai == 1 &&
-                                                                      (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) &&
-                                                                      c.TenViTri.ToLower().Contains(kw)));
+                    viTriQuery = viTriQuery.Where(c =>
+                        c.TenViTri.ToLower().Contains(kw) ||
+                        c.MaTinNavigation.TieuDeChienDich.ToLower().Contains(kw) ||
+                        (c.MaTinNavigation.MaCongTyNavigation != null && c.MaTinNavigation.MaCongTyNavigation.TenCongTy.ToLower().Contains(kw)));
                 }
 
-                // 2. Lọc Địa điểm
+                // Lọc Địa điểm
                 if (maPhuong.HasValue && maPhuong.Value > 0)
                 {
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) && c.MaPhuong == maPhuong.Value));
+                    viTriQuery = viTriQuery.Where(c => c.MaPhuong == maPhuong.Value);
                 }
                 else if (maTP.HasValue && maTP.Value > 0)
                 {
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) && c.MaPhuongNavigation.MaTp == maTP.Value));
+                    viTriQuery = viTriQuery.Where(c => c.MaPhuongNavigation != null && c.MaPhuongNavigation.MaTp == maTP.Value);
                 }
 
-                // 3. Lọc Ngành nghề
-                if (maNganh.HasValue && maNganh.Value > 0)
+                // 🌟 Lọc Ngành nghề (Chỉ giữ lại đúng vị trí thuộc ngành được chọn)
+                if (!string.IsNullOrWhiteSpace(maNganh) && maNganh != "all")
                 {
-                    var allRelatedNganhConIds = await _context.NganhNgheCons
-                        .Where(n => n.MaNganhCon == maNganh.Value || n.MaNganhCha == maNganh.Value)
-                        .Select(n => n.MaNganhCon)
-                        .ToListAsync();
+                    var nganhIds = maNganh
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(x => int.TryParse(x.Trim(), out int id) ? id : (int?)null)
+                        .Where(x => x.HasValue)
+                        .Select(x => x.Value)
+                        .ToList();
 
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) && allRelatedNganhConIds.Contains(c.MaNganhCon)));
-                }
-
-                // 4. Lọc Cấp bậc
-                if (!string.IsNullOrEmpty(capBac) && capBac != "Tất cả")
-                {
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) && c.CapBac != null && c.CapBac.Contains(capBac)));
-                }
-
-                // 5. Lọc Mức lương
-                if (!string.IsNullOrEmpty(mucLuong) && mucLuong != "Tất cả")
-                {
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) && c.Luong != null && c.Luong.Contains(mucLuong)));
-                }
-
-                // 🌟 6. Lọc Kinh nghiệm
-                if (!string.IsNullOrWhiteSpace(kinhNghiem) && kinhNghiem != "Tất cả")
-                {
-                    query = query.Where(t => t.ChiTietViTris.Any(c => c.TrangThai == 1 &&
-                                                                      (!c.NgayHetHan.HasValue || c.NgayHetHan >= now) &&
-                                                                      c.KinhNghiem == kinhNghiem));
-                }
-
-                var results = await query
-                    .OrderByDescending(t => t.IsPromoted)
-                    .ThenByDescending(t => t.NgayHetHan)
-                    .Select(t => new
+                    if (nganhIds.Count > 0)
                     {
-                        maTin = t.MaTin,
-                        tieuDeChienDich = t.TieuDeChienDich,
-                        companyName = t.MaCongTyNavigation.TenCongTy,
-                        logo = t.MaCongTyNavigation.Logo,
-                        deadline = t.NgayHetHan,
-                        isPromoted = t.IsPromoted,
-                        viTris = t.ChiTietViTris
-                            .Where(c => c.TrangThai == 1 && (!c.NgayHetHan.HasValue || c.NgayHetHan >= now))
-                            .Select(c => new
-                            {
-                                id = c.MaViTri,
-                                title = c.TenViTri,
-                                capBac = c.CapBac,
-                                kinhNghiem = c.KinhNghiem, // 🌟 Trả về kinh nghiệm
-                                salaryRange = c.Luong,
-                                deadline = c.NgayHetHan,
-                                locationName = c.MaPhuongNavigation.MaTpNavigation.TenTp
-                            }).ToList()
+                        var allRelatedNganhConIds = await _context.NganhNgheCons
+                            .Where(n => nganhIds.Contains(n.MaNganhCon) || nganhIds.Contains(n.MaNganhCha))
+                            .Select(n => n.MaNganhCon)
+                            .ToListAsync();
+
+                        viTriQuery = viTriQuery.Where(c => nganhIds.Contains(c.MaNganhCon) || allRelatedNganhConIds.Contains(c.MaNganhCon));
+                    }
+                }
+
+                // Lọc Pro Company (VIP)
+                if (isPromoted.HasValue && isPromoted.Value)
+                {
+                    viTriQuery = viTriQuery.Where(c => c.MaTinNavigation.IsPromoted == true);
+                }
+
+                // Lọc Cấp bậc
+                if (!string.IsNullOrWhiteSpace(capBac) && capBac != "all" && capBac != "Tất cả")
+                {
+                    var capBacList = capBac.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim().ToLower()).ToList();
+                    if (capBacList.Count > 0)
+                    {
+                        viTriQuery = viTriQuery.Where(c => c.CapBac != null && capBacList.Any(cb => c.CapBac.ToLower().Trim() == cb));
+                    }
+                }
+
+                // Lọc Kinh nghiệm
+                if (!string.IsNullOrWhiteSpace(kinhNghiem) && kinhNghiem != "all" && kinhNghiem != "Tất cả")
+                {
+                    var knList = kinhNghiem.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim().ToLower()).ToList();
+                    if (knList.Count > 0)
+                    {
+                        viTriQuery = viTriQuery.Where(c => c.KinhNghiem != null && knList.Any(kn => c.KinhNghiem.ToLower().Contains(kn)));
+                    }
+                }
+
+                // Lọc Mức lương
+                if (!string.IsNullOrWhiteSpace(mucLuongRadio) && mucLuongRadio != "all")
+                {
+                    switch (mucLuongRadio)
+                    {
+                        case "thoa-thuan":
+                            viTriQuery = viTriQuery.Where(c => c.Luong != null && (c.Luong.ToLower().Contains("thỏa thuận") || c.Luong.ToLower().Contains("thoa thuan")));
+                            break;
+                        case "duoi-10": tuLuong = 0; denLuong = 10; break;
+                        case "10-15": tuLuong = 10; denLuong = 15; break;
+                        case "15-20": tuLuong = 15; denLuong = 20; break;
+                        case "20-25": tuLuong = 20; denLuong = 25; break;
+                        case "25-30": tuLuong = 25; denLuong = 30; break;
+                        case "30-50": tuLuong = 30; denLuong = 50; break;
+                        case "tren-50": tuLuong = 50; denLuong = null; break;
+                    }
+                }
+
+                if (tuLuong.HasValue || denLuong.HasValue)
+                {
+                    viTriQuery = viTriQuery.Where(c => c.Luong != null && !c.Luong.ToLower().Contains("thỏa thuận") && !c.Luong.ToLower().Contains("thoa thuan"));
+
+                    if (tuLuong.HasValue && !denLuong.HasValue)
+                    {
+                        viTriQuery = viTriQuery.Where(c => c.Luong.Contains(tuLuong.Value.ToString()) || c.Luong.ToLower().Contains("trên " + tuLuong.Value));
+                    }
+                    else if (tuLuong.HasValue && denLuong.HasValue)
+                    {
+                        viTriQuery = viTriQuery.Where(c => c.Luong.Contains(tuLuong.Value.ToString()) || c.Luong.Contains(denLuong.Value.ToString()));
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(mucLuong) && mucLuong != "all" && mucLuong != "Tất cả")
+                {
+                    viTriQuery = viTriQuery.Where(c => c.Luong != null && c.Luong.Contains(mucLuong));
+                }
+
+                // 🌟 2. LẤY DANH SÁCH VỊ TRÍ ĐÃ LỌC
+                var rawPositions = await viTriQuery.ToListAsync();
+
+                // 🌟 3. GỘP NHÓM THEO CHIẾN DỊCH CHA 
+                var results = rawPositions
+                    .GroupBy(c => c.MaTinNavigation)
+                    .OrderByDescending(g => g.Key.IsPromoted)
+                    .ThenByDescending(g => g.Key.NgayHetHan)
+                    .Select(g => new
+                    {
+                        maTin = g.Key.MaTin,
+                        tieuDeChienDich = g.Key.TieuDeChienDich,
+                        companyName = g.Key.MaCongTyNavigation != null ? g.Key.MaCongTyNavigation.TenCongTy : "Công ty ẩn danh",
+                        logo = g.Key.MaCongTyNavigation != null ? g.Key.MaCongTyNavigation.Logo : null,
+                        deadline = g.Key.NgayHetHan,
+                        isPromoted = g.Key.IsPromoted,
+                        viTris = g.Select(c => new
+                        {
+                            id = c.MaViTri,
+                            title = c.TenViTri,
+                            capBac = c.CapBac,
+                            kinhNghiem = c.KinhNghiem,
+                            salaryRange = c.Luong,
+                            deadline = c.NgayHetHan,
+                            locationName = c.MaPhuongNavigation != null && c.MaPhuongNavigation.MaTpNavigation != null
+                                ? c.MaPhuongNavigation.MaTpNavigation.TenTp
+                                : "Toàn quốc"
+                        }).ToList()
                     })
-                    .ToListAsync();
+                    .ToList();
 
                 return Ok(new { success = true, data = results });
             }
@@ -204,8 +268,8 @@ namespace TKVL.Controllers
                 {
                     id = t.MaTin,
                     title = t.TieuDeChienDich,
-                    companyName = t.MaCongTyNavigation.TenCongTy,
-                    logo = t.MaCongTyNavigation.Logo,
+                    companyName = t.MaCongTyNavigation != null ? t.MaCongTyNavigation.TenCongTy : "Công ty ẩn danh",
+                    logo = t.MaCongTyNavigation != null ? t.MaCongTyNavigation.Logo : null,
                     deadline = t.NgayHetHan,
                     // Chỉ trả về các vị trí đã duyệt (TrangThai = 1) và còn hạn
                     danhSachViTri = t.ChiTietViTris
@@ -221,8 +285,10 @@ namespace TKVL.Controllers
                             quyenLoi = v.QuyenLoi,
                             capBac = v.CapBac,
                             ngayHetHan = v.NgayHetHan,
-                            phuongXa = v.MaPhuongNavigation.TenPhuong,
-                            locationName = v.MaPhuongNavigation.MaTpNavigation.TenTp
+                            phuongXa = v.MaPhuongNavigation != null ? v.MaPhuongNavigation.TenPhuong : "",
+                            locationName = v.MaPhuongNavigation != null && v.MaPhuongNavigation.MaTpNavigation != null
+                                ? v.MaPhuongNavigation.MaTpNavigation.TenTp
+                                : "Toàn quốc"
                         }).ToList()
                 })
                 .FirstOrDefaultAsync();
@@ -269,7 +335,7 @@ namespace TKVL.Controllers
             }
         }
 
-        // DTO Nộp đơn
+        // DTO Nộp đơn[cite: 9]
         public class ApplyRequest
         {
             public int MaViTri { get; set; }
@@ -287,7 +353,7 @@ namespace TKVL.Controllers
             {
                 var now = DateTime.Now;
 
-                // 1. Kiểm tra vị trí ứng tuyển có đang mở và còn hạn hay không
+                // 1. Kiểm tra vị trí ứng tuyển có đang mở và còn hạn hay không[cite: 9]
                 var position = await _context.ChiTietViTris
                     .Include(v => v.MaTinNavigation)
                     .FirstOrDefaultAsync(v => v.MaViTri == request.MaViTri
@@ -301,7 +367,7 @@ namespace TKVL.Controllers
                     return BadRequest(new { success = false, message = "Vị trí tuyển dụng này đã đóng hoặc đã hết hạn nộp hồ sơ!" });
                 }
 
-                // 2. Xác định User ID từ CV
+                // 2. Xác định User ID từ CV[cite: 9]
                 var cv = await _context.Cvs.FindAsync(request.MaCv);
                 if (cv == null)
                 {
@@ -310,7 +376,7 @@ namespace TKVL.Controllers
 
                 int currentUserId = cv.MaUser;
 
-                // 3. Kiểm tra xem ứng viên đã nộp vào vị trí NÀY chưa
+                // 3. Kiểm tra xem ứng viên đã nộp vào vị trí NÀY chưa[cite: 9]
                 var alreadyApplied = await _context.DonUngTuyens
                     .AnyAsync(d => d.MaViTri == request.MaViTri && d.MaCvNavigation.MaUser == currentUserId);
 
@@ -319,7 +385,7 @@ namespace TKVL.Controllers
                     return BadRequest(new { success = false, message = "Bạn đã ứng tuyển vị trí này rồi!" });
                 }
 
-                // 4. Tạo đơn ứng tuyển
+                // 4. Tạo đơn ứng tuyển[cite: 9]
                 var don = new DonUngTuyen
                 {
                     MaViTri = request.MaViTri,
@@ -400,12 +466,27 @@ namespace TKVL.Controllers
         {
             try
             {
-                var bookmarkedIds = await _context.TinDaLuus
+                var bookmarks = await _context.TinDaLuus
+                    .Include(t => t.MaViTriNavigation)
+                    .Include(t => t.MaViTriNavigation)
                     .Where(x => x.MaUser == maUser)
-                    .Select(x => x.MaViTri)
+                    .Select(x => new
+                    {
+                        maViTri = x.MaViTri,
+                        maTin = x.MaViTriNavigation != null ? x.MaViTriNavigation.MaTin : 0
+                    })
                     .ToListAsync();
 
-                return Ok(new { success = true, data = bookmarkedIds });
+                var viTriIds = bookmarks.Select(b => b.maViTri).Distinct().ToList();
+                var tinIds = bookmarks.Select(b => b.maTin).Where(id => id > 0).Distinct().ToList();
+
+                return Ok(new
+                {
+                    success = true,
+                    data = viTriIds, // Tương thích ngược
+                    viTriIds = viTriIds,
+                    maTinIds = tinIds
+                });
             }
             catch (Exception ex)
             {

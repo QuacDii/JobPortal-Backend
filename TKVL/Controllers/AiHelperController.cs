@@ -1,9 +1,15 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System;
+using System.Linq;
+using System.Net.Http;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using TKVL.Models;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using TKVL.Models;
 
 namespace TKVL.Controllers
 {
@@ -25,13 +31,42 @@ namespace TKVL.Controllers
         [HttpPost("generate-cv-tips")]
         public async Task<IActionResult> GenerateCvTips([FromBody] AiCvRequestDto request)
         {
+            // 1. Kiểm tra dữ liệu đầu vào
             if (string.IsNullOrEmpty(request.Industry) || string.IsNullOrEmpty(request.Description))
             {
                 return BadRequest(new { message = "Vui lòng cung cấp ngành nghề và mô tả." });
             }
 
-            string apiKey = _configuration["GeminiSettings:ApiKey"]?.Trim();
+            // 2. Xác định danh tính User từ Token JWT
+            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)
+                           ?? User.Claims.FirstOrDefault(c => c.Type == "nameid")
+                           ?? User.Claims.FirstOrDefault(c => c.Type == "sub");
 
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int maUser))
+            {
+                return Unauthorized(new { message = "Vui lòng đăng nhập để sử dụng tính năng AI!" });
+            }
+
+            // 3. Kiểm tra quyền hạn & số lượt AI trong User_DacQuyen
+            var aiRecords = await _context.UserDacQuyens
+                .Where(ud => ud.MaUser == maUser)
+                .Join(_context.DacQuyens,
+                      ud => ud.MaDacQuyen,
+                      dq => dq.MaDacQuyen,
+                      (ud, dq) => new { UserDacQuyen = ud, dq.MaCode })
+                .Where(x => x.MaCode == "UV_AI_WRITE" || x.MaCode == "UV_AI_CV")
+                .ToListAsync();
+
+            bool isUnlimitedActive = aiRecords.Any(x => x.UserDacQuyen.SoLuotConLai == -1 && x.UserDacQuyen.NgayHetHan > DateTime.Now);
+            var finiteCreditRecord = aiRecords.FirstOrDefault(x => x.UserDacQuyen.SoLuotConLai.HasValue && x.UserDacQuyen.SoLuotConLai.Value > 0)?.UserDacQuyen;
+
+            if (!isUnlimitedActive && finiteCreditRecord == null)
+            {
+                return BadRequest(new { message = "Bạn đã hết lượt sử dụng AI. Vui lòng nâng cấp tài khoản hoặc mua thêm lượt!" });
+            }
+
+            // 4. Cấu hình & gọi Google Gemini API
+            string apiKey = _configuration["GeminiSettings:ApiKey"]?.Trim();
             if (string.IsNullOrEmpty(apiKey))
             {
                 return StatusCode(500, new { message = "Thiếu cấu hình API Key của Gemini trong appsettings.json" });
@@ -51,10 +86,11 @@ namespace TKVL.Controllers
             };
 
             var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
-
             string geminiUrl = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={apiKey}";
+
             var response = await _httpClient.PostAsync(geminiUrl, content);
             var responseString = await response.Content.ReadAsStringAsync();
+
             if (!response.IsSuccessStatusCode)
             {
                 Console.WriteLine($"[LỖI GOOGLE GEMINI]: {responseString}");
@@ -70,7 +106,18 @@ namespace TKVL.Controllers
                     .GetProperty("parts")[0]
                     .GetProperty("text").GetString();
 
-                return Ok(new { data = generatedText });
+                // 5. Trừ 1 lượt nếu đang sử dụng lượt hữu hạn
+                if (!isUnlimitedActive && finiteCreditRecord != null)
+                {
+                    finiteCreditRecord.SoLuotConLai -= 1;
+                    await _context.SaveChangesAsync();
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    data = generatedText
+                });
             }
             catch
             {
@@ -83,14 +130,12 @@ namespace TKVL.Controllers
         {
             try
             {
-                // 1. Lấy JD và CV
                 var viTri = await _context.ChiTietViTris.FindAsync(request.MaViTri);
                 if (viTri == null) return NotFound(new { message = "Không tìm thấy vị trí tuyển dụng." });
 
                 var cv = await _context.Cvs.FindAsync(request.MaCv);
                 if (cv == null) return NotFound(new { message = "Không tìm thấy hồ sơ CV." });
 
-                // 🌟 KIỂM TRA CHẶN CV UPLOAD KHÔNG CÓ TEXT
                 if (string.IsNullOrEmpty(cv.DuLieuCv))
                 {
                     return BadRequest(new { message = "Tính năng AI hiện tại chỉ hỗ trợ phân tích các CV được tạo trực tiếp trên hệ thống, do CV tải lên không thể trích xuất văn bản." });
@@ -99,7 +144,6 @@ namespace TKVL.Controllers
                 string jobDescription = $"Mô tả: {viTri.MoTaCongViec}\nYêu cầu: {viTri.YeuCauUngVien}";
                 string cvContent = cv.DuLieuCv;
 
-                // 2. Viết Prompt
                 string prompt = $@"
             Bạn là một hệ thống ATS đánh giá CV. Hãy so sánh độ phù hợp của Hồ sơ ứng viên (CV) so với Yêu cầu công việc (JD).
             
@@ -129,7 +173,6 @@ namespace TKVL.Controllers
                 if (!response.IsSuccessStatusCode)
                     return StatusCode(500, new { message = "Lỗi kết nối đến Google Gemini AI." });
 
-                // 3. Bóc tách JSON
                 using JsonDocument doc = JsonDocument.Parse(responseString);
                 var textResult = doc.RootElement
                     .GetProperty("candidates")[0]
@@ -139,7 +182,6 @@ namespace TKVL.Controllers
 
                 string cleanJson = textResult ?? "";
 
-                // 🌟 Dùng Regex chặn mọi text thừa, chỉ quét trúng đích khối JSON
                 var match = Regex.Match(cleanJson, @"\{.*\}", RegexOptions.Singleline);
                 if (match.Success)
                 {

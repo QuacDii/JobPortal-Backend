@@ -255,6 +255,7 @@ namespace TKVL.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUser(int id)
         {
+            using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
                 var user = await _context.Users.FindAsync(id);
@@ -263,11 +264,56 @@ namespace TKVL.Controllers
                     return NotFound(new { success = false, message = "Không tìm thấy tài khoản người dùng!" });
                 }
 
+                // 1. Chặn xóa tài khoản Quản trị viên (VaiTro == 0)
                 if (user.VaiTro == 0)
                 {
                     return BadRequest(new { success = false, message = "Không thể xóa tài khoản Quản trị viên!" });
                 }
 
+                // 2. Nghiệp vụ: Chặn xóa nếu tài khoản vẫn còn hạn gói dịch vụ / VIP
+                bool isGoiConHan = user.NgayHetHanGoi != null && user.NgayHetHanGoi >= DateTime.Now;
+                bool isDacQuyenConHan = await _context.UserDacQuyens
+                    .AnyAsync(d => d.MaUser == id && d.NgayHetHan >= DateTime.Now);
+
+                if (isGoiConHan || isDacQuyenConHan)
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        message = "Tài khoản hiện vẫn còn hạn gói dịch vụ/VIP đang hoạt động. Không thể xóa tài khoản!"
+                    });
+                }
+
+                // 3. Nghiệp vụ: Chặn xóa nếu Nhà tuyển dụng còn tin tuyển dụng đang hoạt động
+                if (user.VaiTro == 1) // 1: Nhà tuyển dụng
+                {
+                    var hasActiveJobs = await (from ct in _context.CongTies
+                                               join tin in _context.TinTuyenDungs on ct.MaCongTy equals tin.MaCongTy
+                                               where ct.MaUser == id
+                                                  && tin.TrangThai == 1
+                                                  && tin.NgayHetHan >= DateTime.Now
+                                               select tin).AnyAsync();
+
+                    if (hasActiveJobs)
+                    {
+                        return BadRequest(new
+                        {
+                            success = false,
+                            message = "Nhà tuyển dụng vẫn còn tin đăng đang mở. Vui lòng đóng các tin tuyển dụng trước khi xóa!"
+                        });
+                    }
+                }
+
+                // 4. Dọn sạch các bảng khóa ngoại không có Cascade Delete
+                // a. Xóa đơn ứng tuyển gắn với CV của user này (tránh lỗi FK_DonUngTuyen_CV)
+                var userCvIds = await _context.Cvs.Where(c => c.MaUser == id).Select(c => c.MaCv).ToListAsync();
+                if (userCvIds.Any())
+                {
+                    var donUngTuyens = await _context.DonUngTuyens.Where(d => userCvIds.Contains(d.MaCv)).ToListAsync();
+                    _context.DonUngTuyens.RemoveRange(donUngTuyens);
+                }
+
+                // b. Xóa các bảng tương tác cá nhân
                 var tinDaLuus = await _context.TinDaLuus.Where(t => t.MaUser == id).ToListAsync();
                 _context.TinDaLuus.RemoveRange(tinDaLuus);
 
@@ -277,17 +323,21 @@ namespace TKVL.Controllers
                 var jobAlerts = await _context.JobAlerts.Where(j => j.MaUser == id).ToListAsync();
                 _context.JobAlerts.RemoveRange(jobAlerts);
 
-                var lichSuMoKhoas = await _context.LichSuMoKhoaCvs.Where(l => l.MaUser == id).ToListAsync();
-                _context.LichSuMoKhoaCvs.RemoveRange(lichSuMoKhoas);
+                var giaoDichs = await _context.GiaoDiches.Where(g => g.MaUser == id).ToListAsync();
+                _context.GiaoDiches.RemoveRange(giaoDichs);
 
+                // 5. Xóa tài khoản (Database sẽ tự CASCADE xóa CongTy, CV, User_DacQuyen, LichSuMoKhoaCvs)
                 _context.Users.Remove(user);
                 await _context.SaveChangesAsync();
 
+                await transaction.CommitAsync();
                 return Ok(new { success = true, message = "Đã xóa vĩnh viễn tài khoản và giải phóng Email thành công!" });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi xóa tài khoản!", error = ex.Message });
+                await transaction.RollbackAsync();
+                var errorDetail = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                return StatusCode(500, new { success = false, message = "Lỗi hệ thống khi xóa tài khoản!", error = errorDetail });
             }
         }
     }
